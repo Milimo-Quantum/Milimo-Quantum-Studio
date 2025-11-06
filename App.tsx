@@ -3,16 +3,14 @@ import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import CircuitCanvas from './components/CircuitCanvas';
 import RightPanel from './components/RightPanel';
-import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult } from './types';
+import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
 import { getAgentResponse } from './services/geminiService';
 import { simulate } from './services/quantumSimulator';
 import { gateMap } from './data/gates';
 
-export const ANALYZE_PROMPT = "Analyze my current circuit. Identify its purpose if it's a known algorithm or state, explain the principles behind it, and propose potential next steps or interesting modifications.";
-
-const App: React.FC = () => {
+export const App: React.FC = () => {
   const [numQubits, setNumQubits] = useState(3);
   const [placedGates, setPlacedGates] = useState<PlacedGate[]>([]);
   const [selectedGateId, setSelectedGateId] = useState<string | null>(null);
@@ -65,75 +63,74 @@ const App: React.FC = () => {
 
 
   const executeActions = useCallback((actions: AIAction[]) => {
-    let finalNumQubits = numQubits;
-    // Start with a shallow copy of the current gates.
-    let pendingGates: PlacedGate[] = [...placedGates];
-
-    const isValidGate = (gate: Omit<PlacedGate, 'instanceId' | 'isSelected'>, currentQubits: number) => {
-      const targetQubitValid = gate.qubit >= 0 && gate.qubit < currentQubits;
-      const controlQubitValid = gate.controlQubit === undefined || (gate.controlQubit >= 0 && gate.controlQubit < currentQubits);
-      return targetQubitValid && controlQubitValid;
-    };
-    
-    // First, determine the final number of qubits for validation purposes, as this might change within the batch.
+    // 1. Determine the final number of qubits. This is the ground truth for all subsequent validation.
     const setQubitAction = actions.find(a => a.type === 'set_qubit_count');
-    if (setQubitAction && setQubitAction.type === 'set_qubit_count') {
-        const newCount = setQubitAction.payload.count;
-        if (newCount >= 2 && newCount <= 5) {
-            finalNumQubits = newCount;
-        }
+    const finalNumQubits = setQubitAction && setQubitAction.type === 'set_qubit_count' 
+        ? setQubitAction.payload.count 
+        : numQubits;
+    
+    if (finalNumQubits < 2 || finalNumQubits > 5) {
+        console.error("AI requested an invalid number of qubits:", finalNumQubits);
+        return; // Abort if qubit count is out of bounds.
     }
 
-    // Process actions sequentially to build the final state of the gates.
-    actions.forEach(action => {
-      switch (action.type) {
-        case 'set_qubit_count':
-          // The primary effect here is clearing the board for subsequent actions in this batch.
-          pendingGates = [];
-          break;
-        case 'clear_circuit':
-          pendingGates = [];
-          break;
-        case 'add_gate': {
-          if (isValidGate(action.payload, finalNumQubits)) {
-            const newGate: PlacedGate = {
-              ...action.payload,
-              instanceId: `${action.payload.gateId}-${Date.now()}`,
-            };
-            pendingGates.push(newGate);
-          } else {
-            console.warn(`AI tried to place an invalid gate for ${finalNumQubits} qubits:`, action.payload);
-          }
-          break;
-        }
-        case 'replace_circuit': {
-          const validGates = action.payload.filter(g => isValidGate(g, finalNumQubits));
-          pendingGates = validGates.map((g, i) => ({
+    let gatePayloads: Omit<PlacedGate, 'instanceId' | 'isSelected'>[] = [];
+
+    // 2. Determine the definitive gate layout. Actions are prioritized to prevent order-of-execution bugs.
+    const replaceAction = actions.find(a => a.type === 'replace_circuit');
+    const clearAction = actions.find(a => a.type === 'clear_circuit');
+
+    if (replaceAction && replaceAction.type === 'replace_circuit') {
+        // If there's a replacement, it's the ONLY source of truth for gates.
+        gatePayloads = replaceAction.payload;
+    } else if (setQubitAction || clearAction) {
+        // A qubit change or explicit clear results in an empty canvas.
+        // We only consider add_gate actions after this.
+        const addActions = actions.filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate');
+        gatePayloads = addActions.map(a => a.payload);
+    } else {
+        // Otherwise, start with the current gates and append any new ones.
+        const currentGates = placedGates.map(({ instanceId, isSelected, ...rest }) => rest);
+        const addedGates = actions
+            .filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate')
+            .map(a => a.payload);
+        gatePayloads = [...currentGates, ...addedGates];
+    }
+    
+    const isValidGate = (gate: Omit<PlacedGate, 'instanceId' | 'isSelected'>, qCount: number) => {
+        const targetQubitValid = gate.qubit >= 0 && gate.qubit < qCount;
+        const controlQubitValid = gate.controlQubit === undefined || (gate.controlQubit >= 0 && gate.controlQubit < qCount);
+        return targetQubitValid && controlQubitValid;
+    };
+
+    // 3. Validate all gates against the final qubit count and assign unique IDs.
+    const validatedPlacedGates: PlacedGate[] = gatePayloads
+        .filter(g => isValidGate(g, finalNumQubits))
+        .map((g, i) => ({
             ...g,
             instanceId: `${g.gateId}-${Date.now()}-${i}`,
-          }));
-          break;
-        }
-        case 'generate_code':
-          setActiveTab('code');
-          break;
-        default:
-          console.warn('Unknown AI action:', action);
-      }
-    });
+        }));
 
-    // Atomically apply the final calculated state to React.
-    if (finalNumQubits !== numQubits) {
-        setNumQubits(finalNumQubits);
-        if (visualizedQubit >= finalNumQubits) {
-            setVisualizedQubit(0);
-        }
+    if (validatedPlacedGates.length < gatePayloads.length) {
+        console.warn("Some gates were discarded by the validator as they were invalid for the final qubit count.");
     }
     
-    setPlacedGates(pendingGates);
-    setSelectedGateId(null); // Always deselect gates after an AI action
+    // 4. Atomically apply the final state to React.
+    setNumQubits(finalNumQubits);
+    setPlacedGates(validatedPlacedGates);
+    setSelectedGateId(null);
 
-  }, [numQubits, placedGates, visualizedQubit]);
+    // Update visualizedQubit if it's now out of bounds.
+    if (visualizedQubit >= finalNumQubits) {
+        setVisualizedQubit(0);
+    }
+    
+    // Switch to code tab if requested
+    if (actions.some(a => a.type === 'generate_code')) {
+        setActiveTab('code');
+    }
+
+  }, [numQubits, placedGates, visualizedQubit, setVisualizedQubit, setActiveTab]);
 
 
   const handleSend = useCallback(async (prompt: string) => {
@@ -188,7 +185,7 @@ const App: React.FC = () => {
   }, [isAiLoading, placedGates, messages, executeActions, simulationResult, numQubits]);
 
   const handleAnalyzeCircuit = useCallback(() => {
-    handleSend(ANALYZE_PROMPT);
+    handleSend("Analyze my current circuit. Identify its purpose if it's a known algorithm or state, explain the principles behind it, and propose potential next steps or interesting modifications.");
   }, [handleSend]);
   
   const handleClearCircuit = useCallback(() => {

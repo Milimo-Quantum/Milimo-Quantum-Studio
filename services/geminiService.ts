@@ -1,7 +1,6 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Content, Part } from "@google/genai";
 import type { AIResponse, AgentStatusUpdate, PlacedGate, AIAction, Message, SimulationResult, Source, AddGatePayload } from "../types";
 import { gateMap, gates } from "../data/gates";
-import { ANALYZE_PROMPT } from "../App";
 
 const API_KEY = process.env.API_KEY;
 if (!API_KEY) {
@@ -25,18 +24,29 @@ const designTools = [addGateTool, replaceCircuitTool, getSimulationResultsTool, 
 // --- Agent System Instructions ---
 const gateLibrary = gates.map(g => `- **${g.name} (id: '${g.id}', type: ${g.type})**: ${g.description}`).join('\n');
 
-const managerSystemInstruction = (numQubits: number) => `You are the Manager of Milimo AI, a team of specialized quantum AI agents. Your job is to create a robust, multi-step plan to fulfill the user's request with the highest quality.
+const sotaConceptsLibrary = `
+**SOTA Circuit Concepts Library:**
+- **5-Qubit Error Correcting Code:** The smallest perfect code that can protect against any single-qubit error (X, Y, or Z). A true SOTA example for error correction. Requires 5 qubits.
+- **Quantum Teleportation:** A protocol to transmit a quantum state from one location to another using a pre-shared Bell pair and classical communication. Requires 3 qubits.
+- **Deutsch-Jozsa Algorithm:** A simple but powerful demonstration of quantum parallelism, determining if a function is constant or balanced in a single evaluation. Requires N+1 qubits for an N-bit function.
+`;
 
-**Canvas State:** The canvas currently has ${numQubits} qubits (0 to ${numQubits - 1}), but this can be changed to any value between 2 and 5 using the 'set_qubit_count' tool.
+const managerSystemInstruction = (numQubits: number, circuitDescription: string) => `You are the Manager of Milimo AI, a team of specialized quantum AI agents. Your job is to create a robust, multi-step plan to fulfill the user's request with the highest quality.
+
+**Canvas State:**
+- The canvas currently has ${numQubits} qubits (0 to ${numQubits - 1}). This can be changed to any value between 2 and 5 using the 'set_qubit_count' tool.
+- **Current Circuit on Canvas:** ${circuitDescription}
 
 **Gate Library:**
 ${gateLibrary}
 
+${sotaConceptsLibrary}
+
 **Core Directives:**
-1.  **Prioritize the Ideal Solution:** First, determine the best, most advanced, and most appropriate circuit for the user's request, regardless of the current qubit count. THEN, formulate a plan to either build it directly if it fits, or adapt the canvas first if necessary.
-2.  **Analyze Intent & Complexity:** Infer the user's true goal. If they use words like "advanced," "SOTA," or "robust," you MUST formulate a plan that delivers a sophisticated result. A request for "advanced spacecraft communication" MUST NOT result in a basic Bell state.
-3.  **Encourage Gate Diversity:** Your plan should leverage the full potential of the gate library. If a request involves phase manipulation or state swapping, the plan should guide agents to consider specialized gates like 'cz' or 'swap'.
-4.  **Mandatory Quality Assurance:** For any abstract or complex request that requires research, your plan MUST include a 'Critic' step immediately after the 'Research' step. The Critic's job is to prevent "lazy" solutions.
+1.  **Prioritize the Ideal Solution:** First, determine the best, most advanced, and most appropriate circuit for the user's request, referencing the SOTA library. THEN, formulate a plan to either build it directly if it fits, or adapt the canvas first if necessary.
+2.  **Analyze Intent & Complexity:** Infer the user's true goal. If they use words like "advanced," "SOTA," or "robust," you MUST formulate a plan that delivers a sophisticated result. A request for "advanced spacecraft communication" MUST NOT result in a basic GHZ state or 3-qubit bit-flip code.
+3.  **Handle Analysis Requests:** If the user asks to "analyze the current circuit", your output plan MUST be an empty array: \`[]\`. The Explanation agent will automatically handle the analysis based on the current circuit state.
+4.  **Mandatory Quality Assurance:** For any abstract or complex request that requires research to build a new circuit, your plan MUST include a 'Critic' step immediately after the 'Research' step. The Critic's job is to prevent "lazy" solutions.
 5.  **Formulate the Plan:** Your output MUST be a single JSON object containing a "plan" array.
 
 **Example: Advanced Request**
@@ -46,7 +56,7 @@ ${gateLibrary}
   "plan": [
     {
       "agent_to_call": "Research",
-      "reasoning": "The user has requested a specific, advanced algorithm. I need to verify its structure and qubit requirements before proceeding.",
+      "reasoning": "The user has requested a specific, advanced algorithm from the SOTA library. I need to get its precise gate layout.",
       "prompt": "Provide the specific gate sequence for the encoding circuit of the 5-qubit perfect error correcting code. Confirm it requires 5 qubits."
     },
     {
@@ -70,7 +80,7 @@ const managerSchema = {
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    agent_to_call: { type: Type.STRING, enum: ['Research', 'Critic', 'Design'] },
+                    agent_to_call: { type: Type.STRING, enum: ['Research', 'Critic', 'Design', 'Explanation'] },
                     reasoning: { type: Type.STRING },
                     prompt: { type: Type.STRING },
                 },
@@ -86,20 +96,24 @@ const criticSystemInstruction = `You are the Critic for Milimo AI, the Quality A
 **Gate Library:**
 ${gateLibrary}
 
-**Core Directives:**
-1. **Assess Alignment:** Does the research finding truly address the user's request, especially regarding specified complexity (e.g., "advanced")?
-2. **Evaluate Implementation Elegance:** When creating the \`refined_prompt\`, you MUST consider if there is a more direct or elegant way to build the circuit using the full range of available gates. For example, instead of a complex combination of CNOTs and Hadamards to create a Controlled-Z, you MUST instruct the agent to use the 'cz' gate directly.
-3. **Manage Canvas Resources:** If the best-researched option requires a different number of qubits than is currently on the canvas (but is still within the 2-5 limit), your 'refined_prompt' for the Design Agent MUST begin with the instruction to change the qubit count using the 'set_qubit_count' tool.
-4. **Provide Actionable Feedback:** Your output MUST be a JSON object with \`is_approved\`, \`reasoning\`, and a \`refined_prompt\` for the Design Agent if approved.
+${sotaConceptsLibrary}
 
-**Example:**
-*User Request:* "build the 5-qubit error correcting code"
-*Research Finding:* "The 5-qubit code requires 5 qubits and a sequence of Hadamard and CNOT gates..."
+**Core Directives:**
+1.  **Assess Alignment & Advancement:** Does the research finding truly address the user's request, especially regarding specified complexity? If the user asks for a 'more complex' or 'advanced' solution, you MUST REJECT any proposal for a standard, foundational circuit like a GHZ state or the 3-qubit bit-flip code. Your reasoning must state that the solution is too basic.
+2.  **Evaluate Implementation Elegance:** When creating the \`refined_prompt\`, you MUST consider if there is a more direct or elegant way to build the circuit using the full range of available gates. For example, instead of a complex combination of CNOTs and Hadamards to create a Controlled-Z, you MUST instruct the agent to use the 'cz' gate directly.
+3.  **Manage Canvas Resources:** If the best-researched option requires a different number of qubits, your 'refined_prompt' for the Design Agent MUST begin with the instruction to change the qubit count using the 'set_qubit_count' tool.
+4.  **Provide Actionable Feedback:** Your output MUST be a JSON object.
+    - If you approve, it must contain \`is_approved: true\`, \`reasoning\`, and a \`refined_prompt\` for the Design Agent.
+    - If you reject, it must contain \`is_approved: false\`, \`reasoning\`, and a \`rejection_prompt\` that tells the Research agent what to look for instead (e.g., "Find the circuit for the 5-qubit perfect error-correcting code.").
+
+**Example: Rejection**
+*User Request:* "show me a more advanced circuit"
+*Research Finding:* "The 3-qubit bit-flip code..."
 *Your JSON Output:*
 {
-  "is_approved": true,
-  "reasoning": "The research confirms the user's request is feasible within the 2-5 qubit limit. The plan is approved and the canvas must be resized.",
-  "refined_prompt": "First, use the 'set_qubit_count' tool to set the canvas to 5 qubits. Then, construct the encoding circuit for the 5-qubit error correction code using the specific gate sequence found during research."
+  "is_approved": false,
+  "reasoning": "The user requested a more advanced circuit. The 3-qubit bit-flip code is a foundational concept, not a significant step up in complexity. Rejecting this lazy solution.",
+  "rejection_prompt": "Research the 5-qubit perfect error-correcting code, which is a true SOTA example and fits within the canvas limits."
 }`;
 
 const criticSchema = {
@@ -108,6 +122,7 @@ const criticSchema = {
         is_approved: { type: Type.BOOLEAN },
         reasoning: { type: Type.STRING },
         refined_prompt: { type: Type.STRING },
+        rejection_prompt: { type: Type.STRING },
     },
     required: ['is_approved', 'reasoning'],
 };
@@ -128,17 +143,19 @@ ${gateLibrary}
 - **EXECUTE PRECISELY:** Your task has been vetted. Do not deviate. You MUST construct the circuit exactly as described in the prompt using the available tools.
 - **PRIORITIZE 'replace_circuit'**: For building entire new states from scratch, 'replace_circuit' is preferred to ensure a clean canvas, especially after changing the qubit count.`;
 
-const explanationAgentSystemInstruction = `You are the Explanation Agent for Milimo AI. Your job is to provide a final, user-facing response that synthesizes the entire problem-solving journey.
+const explanationAgentSystemInstruction = `You are the Explanation Agent for Milimo AI. Your job is to provide a final, user-facing response that synthesizes the entire problem-solving journey using a strict analytical process.
 
-**Your Input:** A JSON object containing the user's original request, research findings, the critic's reasoning, and a summary of actions taken.
+**Your Input:** A JSON object containing the user's request, research, critic reasoning, and a definitive snapshot of the final circuit state.
 
-**Core Directive:**
-- Weave a cohesive narrative. Do not just list the inputs.
-- Explain WHAT was built on the canvas.
-- Crucially, explain WHY it was built, referencing the user's intent and the critic's decision-making process (e.g., "To build this more advanced circuit, we first increased the number of qubits to 5...").
-- If web sources were used, mention them.
-- Format your response for clarity using Markdown (bolding, lists, etc.).`;
-
+**Core Directives & Process:**
+1.  **Step 1: Step-by-Step Analysis (Internal Monologue):** First, you MUST perform a step-by-step analysis of the gates in the provided \`final_canvas_state\`. Describe the effect of each gate in sequence on the qubits.
+2.  **Step 2: Identify Purpose & Gaps (Internal Monologue):** Based ONLY on your analysis from Step 1, you must then explicitly state the circuit's purpose. If the circuit is an incomplete version of a known algorithm, you MUST state what is missing. For example: *'This circuit creates redundancy by copying the state of q0 to q1 and q2. It is the core of a bit-flip encoding circuit but is missing the initial Hadamard gate required to encode a superposition state.'*
+3.  **Step 3: Synthesize Final Response (User-Facing Output):** Finally, combine your rigorous analysis with the user's intent and the critic's reasoning to generate the user-facing text.
+    - Your description of the circuit on the canvas MUST be based *exclusively* on your analysis of the provided \`final_canvas_state\` object. DO NOT HALLUCINATE GATES that aren't there.
+    - Explain WHAT was built on the canvas, being precise and accurate.
+    - Explain WHY it was built, referencing the user's intent and the critic's decision-making process.
+    - If the request was to analyze an existing circuit, your entire response is the analysis from steps 1 & 2.
+    - Format your response for clarity using Markdown (bolding, lists, etc.).`;
 
 // The main function that orchestrates the agent workflow.
 export const getAgentResponse = async (
@@ -149,29 +166,22 @@ export const getAgentResponse = async (
   onStatusUpdate: (update: AgentStatusUpdate) => void
 ): Promise<AIResponse> => {
     
-    // 1. Determine the user's prompt
     const lastUserMessage = [...allMessages].reverse().find(m => m.type === 'text' && m.sender === 'user');
-    let userPromptText = (lastUserMessage?.type === 'text') ? lastUserMessage.text : '';
+    const userPromptText = (lastUserMessage?.type === 'text') ? lastUserMessage.text : '';
 
-    if (userPromptText === ANALYZE_PROMPT) {
-        if (currentCircuit.length === 0) {
-            return { displayText: "The circuit is empty. Add some gates and I'll be happy to analyze it for you!", actions: [] };
-        }
-        const circuitDescription = currentCircuit.map(g => `${gateMap.get(g.gateId)?.name || g.gateId} on q[${g.qubit}]${g.controlQubit !== undefined ? ` controlled by q[${g.controlQubit}]` : ''}`).join('; ');
-        userPromptText = `The user wants to analyze the current circuit. Circuit description: [${circuitDescription}]. User's request: ${ANALYZE_PROMPT}`;
-    }
+    const circuitDescriptionForManager = currentCircuit.length > 0
+        ? JSON.stringify(currentCircuit.map(g => ({ gate: g.gateId, qubit: g.qubit, control: g.controlQubit, position: g.left })))
+        : 'The circuit is currently empty.';
     
-    // 2. Manager Agent: Creates the plan
     onStatusUpdate({ agent: 'Manager', status: 'running', message: 'Creating project plan...' });
     const managerResponse = await ai.models.generateContent({
         model,
         contents: [{ role: 'user', parts: [{ text: userPromptText }] }],
-        config: { systemInstruction: managerSystemInstruction(numQubits), responseMimeType: 'application/json', responseSchema: managerSchema }
+        config: { systemInstruction: managerSystemInstruction(numQubits, circuitDescriptionForManager), responseMimeType: 'application/json', responseSchema: managerSchema }
     });
     const plan = JSON.parse(managerResponse.text).plan;
     onStatusUpdate({ agent: 'Manager', status: 'completed', message: 'Plan created.' });
 
-    // 3. Execute the plan
     let executionContext = {
         userPrompt: userPromptText,
         researchFindings: '',
@@ -181,77 +191,147 @@ export const getAgentResponse = async (
         sources: undefined as Source[] | undefined,
     };
 
-    for (const step of plan) {
-        switch (step.agent_to_call) {
-            case 'Research':
-                onStatusUpdate({ agent: 'Research', status: 'running', message: step.reasoning });
-                const researchResponse = await ai.models.generateContent({
-                    model,
-                    contents: [{ role: 'user', parts: [{ text: step.prompt }] }],
-                    config: { tools: [{ googleSearch: {} }] }
-                });
-                executionContext.researchFindings = researchResponse.text;
-                const groundingMetadata = researchResponse.candidates?.[0]?.groundingMetadata;
-                if (groundingMetadata?.groundingChunks) {
-                    executionContext.sources = groundingMetadata.groundingChunks
-                        .map(chunk => ({ uri: chunk.web?.uri || '', title: chunk.web?.title || 'Untitled' }))
-                        .filter(source => source.uri);
-                }
-                onStatusUpdate({ agent: 'Research', status: 'completed', message: 'Research complete.' });
-                break;
+    const researchStep = plan.find((step: any) => step.agent_to_call === 'Research');
+    if (researchStep) {
+        onStatusUpdate({ agent: 'Research', status: 'running', message: researchStep.reasoning });
+        const researchResponse = await ai.models.generateContent({
+            model,
+            contents: [{ role: 'user', parts: [{ text: researchStep.prompt }] }],
+            config: { tools: [{ googleSearch: {} }] }
+        });
+        executionContext.researchFindings = researchResponse.text;
+        const groundingMetadata = researchResponse.candidates?.[0]?.groundingMetadata;
+        if (groundingMetadata?.groundingChunks) {
+            executionContext.sources = groundingMetadata.groundingChunks
+                .map(chunk => ({ uri: chunk.web?.uri || '', title: chunk.web?.title || 'Untitled' }))
+                .filter(source => source.uri);
+        }
+        onStatusUpdate({ agent: 'Research', status: 'completed', message: 'Research complete.' });
+    }
 
-            case 'Critic':
-                onStatusUpdate({ agent: 'Critic', status: 'running', message: step.reasoning });
-                const criticPrompt = `User's original request: "${executionContext.userPrompt}"\n\nResearch Agent's findings: "${executionContext.researchFindings}"`;
-                const criticResponse = await ai.models.generateContent({
-                    model,
-                    contents: [{ role: 'user', parts: [{ text: criticPrompt }] }],
-                    config: { systemInstruction: criticSystemInstruction, responseMimeType: 'application/json', responseSchema: criticSchema }
-                });
-                const criticDecision = JSON.parse(criticResponse.text);
-                
-                if (!criticDecision.is_approved) {
-                    onStatusUpdate({ agent: 'Critic', status: 'completed', message: 'Plan rejected.' });
-                    return { displayText: `I reconsidered the initial approach. Here's why: ${criticDecision.reasoning}\n\nPlease try rephrasing your request.`, actions: [] };
-                }
+    const criticStep = plan.find((step: any) => step.agent_to_call === 'Critic');
+    if (criticStep) {
+        let isApproved = false;
+        let attempts = 0;
+        const MAX_ATTEMPTS = 2;
+
+        while (!isApproved && attempts < MAX_ATTEMPTS) {
+            attempts++;
+            onStatusUpdate({ agent: 'Critic', status: 'running', message: criticStep.reasoning });
+            const criticPrompt = `User's original request: "${executionContext.userPrompt}"\n\nResearch Agent's findings: "${executionContext.researchFindings}"`;
+            const criticResponse = await ai.models.generateContent({
+                model,
+                contents: [{ role: 'user', parts: [{ text: criticPrompt }] }],
+                config: { systemInstruction: criticSystemInstruction, responseMimeType: 'application/json', responseSchema: criticSchema }
+            });
+            const criticDecision = JSON.parse(criticResponse.text);
+
+            if (criticDecision.is_approved) {
+                isApproved = true;
                 executionContext.criticReasoning = criticDecision.reasoning;
                 executionContext.designPrompt = criticDecision.refined_prompt; 
                 onStatusUpdate({ agent: 'Critic', status: 'completed', message: 'Plan approved.' });
-                break;
-
-            case 'Design':
-                onStatusUpdate({ agent: 'Design', status: 'running', message: step.reasoning });
-                const designPrompt = executionContext.designPrompt || step.prompt;
-                
-                // This part handles the function calling for the design agent
-                const designResponse = await ai.models.generateContent({
-                    model,
-                    contents: [{ role: 'user', parts: [{ text: designPrompt }] }],
-                    config: { tools: [{ functionDeclarations: designTools }], systemInstruction: designAgentSystemInstruction(numQubits) },
-                });
-                
-                if (designResponse.functionCalls && designResponse.functionCalls.length > 0) {
-                    for (const funcCall of designResponse.functionCalls) {
-                        switch(funcCall.name) {
-                            case 'add_gate':
-                                executionContext.designActions.push({ type: 'add_gate', payload: funcCall.args as AddGatePayload });
-                                break;
-                            case 'replace_circuit':
-                                executionContext.designActions.push({ type: 'replace_circuit', payload: (funcCall.args as any).gates });
-                                break;
-                            case 'set_qubit_count':
-                                executionContext.designActions.push({ type: 'set_qubit_count', payload: { count: (funcCall.args as any).qubit_count }});
-                                break;
-                            case 'get_simulation_results':
-                                // This tool is just for the agent to get info, no action needed on the canvas
-                                break;
-                        }
+            } else {
+                onStatusUpdate({ agent: 'Critic', status: 'completed', message: `Plan rejected. ${criticDecision.reasoning}` });
+                if (criticDecision.rejection_prompt && attempts < MAX_ATTEMPTS) {
+                    onStatusUpdate({ agent: 'Research', status: 'running', message: 'Finding a more advanced alternative...' });
+                    const researchResponse = await ai.models.generateContent({
+                        model,
+                        contents: [{ role: 'user', parts: [{ text: criticDecision.rejection_prompt }] }],
+                        config: { tools: [{ googleSearch: {} }] }
+                    });
+                    executionContext.researchFindings = researchResponse.text;
+                     const groundingMetadata = researchResponse.candidates?.[0]?.groundingMetadata;
+                    if (groundingMetadata?.groundingChunks) {
+                        executionContext.sources = groundingMetadata.groundingChunks
+                            .map(chunk => ({ uri: chunk.web?.uri || '', title: chunk.web?.title || 'Untitled' }))
+                            .filter(source => source.uri);
                     }
+                    onStatusUpdate({ agent: 'Research', status: 'completed', message: 'Found new approach.' });
+                } else {
+                    return { displayText: `I reconsidered the initial approach: ${criticDecision.reasoning}\n\nI am unable to find a better alternative at this time. Please try rephrasing your request.`, actions: [] };
                 }
-                onStatusUpdate({ agent: 'Design', status: 'completed', message: 'Circuit constructed.' });
-                break;
+            }
+        }
+        if (!isApproved) {
+             return { displayText: "I'm having trouble finding a suitable advanced circuit that meets the quality standards. Please try rephrasing your request.", actions: [] };
         }
     }
+    
+    const designStep = plan.find((step: any) => step.agent_to_call === 'Design');
+    if (designStep) {
+        onStatusUpdate({ agent: 'Design', status: 'running', message: designStep.reasoning });
+        const designPrompt = executionContext.designPrompt || designStep.prompt;
+        
+        const designResponse = await ai.models.generateContent({
+            model,
+            contents: [{ role: 'user', parts: [{ text: designPrompt }] }],
+            config: { tools: [{ functionDeclarations: designTools }], systemInstruction: designAgentSystemInstruction(numQubits) },
+        });
+        
+        if (designResponse.functionCalls && designResponse.functionCalls.length > 0) {
+            for (const funcCall of designResponse.functionCalls) {
+                switch(funcCall.name) {
+                    case 'add_gate':
+                        executionContext.designActions.push({ type: 'add_gate', payload: funcCall.args as AddGatePayload });
+                        break;
+                    case 'replace_circuit':
+                        executionContext.designActions.push({ type: 'replace_circuit', payload: (funcCall.args as any).gates });
+                        break;
+                    case 'set_qubit_count':
+                        executionContext.designActions.push({ type: 'set_qubit_count', payload: { count: (funcCall.args as any).qubit_count }});
+                        break;
+                    case 'get_simulation_results':
+                        break;
+                }
+            }
+        }
+        onStatusUpdate({ agent: 'Design', status: 'completed', message: 'Circuit constructed.' });
+    }
+
+
+    // --- Final State Snapshot Calculation ---
+    // This is the critical fix: determine the *actual* final state of the canvas *before* sending to the explanation agent.
+    let finalNumQubits = numQubits;
+    let finalGates: Omit<PlacedGate, 'instanceId' | 'isSelected'>[] = currentCircuit.map(({ instanceId, isSelected, ...rest }) => rest);
+
+    // Create a temporary state based on the current circuit
+    const initialAction: AIAction | null = plan.length > 0 ? { type: 'replace_circuit', payload: [] } : null; // If a plan exists, we assume we start fresh unless adding
+    const actionsToSimulate = initialAction ? [initialAction, ...executionContext.designActions] : executionContext.designActions;
+
+    // Simulate actions to get the final state
+    if (plan.length > 0) { // Only modify the circuit if there was a plan to do so. Handles "analyze" requests.
+        let tempGatesState: Omit<PlacedGate, 'instanceId' | 'isSelected'>[] = [];
+        let tempQubitState = numQubits;
+
+        const setQubitAction = executionContext.designActions.find(a => a.type === 'set_qubit_count');
+        if (setQubitAction && setQubitAction.type === 'set_qubit_count') {
+            tempQubitState = setQubitAction.payload.count;
+        }
+
+        const replaceAction = executionContext.designActions.find(a => a.type === 'replace_circuit');
+        if (replaceAction && replaceAction.type === 'replace_circuit') {
+            tempGatesState = replaceAction.payload;
+        } else {
+            const addActions = executionContext.designActions.filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate');
+            tempGatesState = addActions.map(a => a.payload);
+        }
+
+        finalNumQubits = tempQubitState;
+        finalGates = tempGatesState;
+    }
+    
+
+    const finalCanvasState = {
+        qubitCount: finalNumQubits,
+        gates: finalGates.map(g => ({
+            gate: gateMap.get(g.gateId)?.name || g.gateId,
+            qubit: g.qubit,
+            controlQubit: g.controlQubit,
+            position: g.left,
+        })).sort((a,b) => a.position - b.position),
+    };
+
 
     // 4. Explanation Agent
     onStatusUpdate({ agent: 'Explanation', status: 'running', message: 'Synthesizing final response...' });
@@ -259,7 +339,7 @@ export const getAgentResponse = async (
     - User's original prompt: "${executionContext.userPrompt}"
     - Research findings: "${executionContext.researchFindings}"
     - Critic's reasoning for approval: "${executionContext.criticReasoning}"
-    - Actions taken by Design agent: ${executionContext.designActions.length > 0 ? executionContext.designActions.map(a => a.type).join(', ') : 'None'}.`;
+    - Final Canvas State: ${JSON.stringify(finalCanvasState)}`;
 
     const explanationResponse = await ai.models.generateContent({
         model,
