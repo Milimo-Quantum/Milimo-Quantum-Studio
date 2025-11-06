@@ -31,7 +31,7 @@ const addGateTool: FunctionDeclaration = {
       },
       controlQubit: {
         type: Type.INTEGER,
-        description: 'For controlled gates like CNOT, the index of the control qubit. Must be provided for CNOT gates.',
+        description: 'For controlled gates (cnot, cz, swap), this is the index of the other qubit involved. Must be provided for these gates.',
       },
       left: {
         type: Type.NUMBER,
@@ -96,7 +96,7 @@ const SYSTEM_INSTRUCTION = `You are Milimo AI, an expert quantum circuit design 
 - If the user asks a question that doesn't require circuit modification, provide a helpful textual answer.
 - The circuit has 3 qubits, indexed 0, 1, and 2.
 - The 'left' parameter for gates is a percentage (0-100) and represents the order of operations. Gates with smaller 'left' values are applied first. Choose sensible, spaced-out values (e.g., 20, 40, 60).
-- For CNOT gates, you MUST specify both 'qubit' (target) and 'controlQubit'.`;
+- For controlled gates (cnot, cz, swap), you MUST specify both 'qubit' and 'controlQubit'.`;
 
 
 /**
@@ -197,9 +197,37 @@ export const generateQiskitCode = (placedGates: PlacedGate[]): string => {
             case 'x':
                 code += `qc.x(${gate.qubit})\n`;
                 break;
+            case 'y':
+                code += `qc.y(${gate.qubit})\n`;
+                break;
+            case 'z':
+                code += `qc.z(${gate.qubit})\n`;
+                break;
+            case 's':
+                code += `qc.s(${gate.qubit})\n`;
+                break;
+            case 'sdg':
+                code += `qc.sdg(${gate.qubit})\n`;
+                break;
+            case 't':
+                code += `qc.t(${gate.qubit})\n`;
+                break;
+            case 'tdg':
+                code += `qc.tdg(${gate.qubit})\n`;
+                break;
             case 'cnot':
                 if (gate.controlQubit !== undefined) {
                     code += `qc.cx(${gate.controlQubit}, ${gate.qubit})\n`;
+                }
+                break;
+            case 'cz':
+                if (gate.controlQubit !== undefined) {
+                    code += `qc.cz(${gate.controlQubit}, ${gate.qubit})\n`;
+                }
+                break;
+            case 'swap':
+                if (gate.controlQubit !== undefined) {
+                    code += `qc.swap(${gate.qubit}, ${gate.controlQubit})\n`;
                 }
                 break;
             case 'measure':
@@ -215,6 +243,6 @@ export const generateQiskitCode = (placedGates: PlacedGate[]): string => {
         .replace(/(from|import|as)/g, '<span class="text-purple-400">$&</span>')
         .replace(/(QuantumCircuit)/g, '<span class="text-sky-400">$&</span>')
         .replace(/\b(qc)\b/g, '<span class="text-yellow-400">$&</span>')
-        .replace(/(\.h\(|\.x\(|\.cx\(|\.measure\()/g, '<span class="text-cyan-400">$&</span>')
+        .replace(/(\.(?:h|x|y|z|s|sdg|t|tdg|cx|cz|swap|measure)\()/g, '<span class="text-cyan-400">$&</span>')
         .replace(/(#.*)/g, '<span class="text-gray-500">$&</span>');
 };

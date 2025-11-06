@@ -5,6 +5,7 @@ import { gateMap } from '../data/gates';
 import CNOTGateIcon from './icons/CNOTGateIcon';
 import OptimizationAgentIcon from './icons/OptimizationAgentIcon';
 import TrashIcon from './icons/TrashIcon';
+import SwapTargetIcon from './icons/SwapTargetIcon';
 
 interface CircuitCanvasProps {
   placedGates: PlacedGate[];
@@ -69,6 +70,65 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
             
             const isControlTop = controlY < top;
 
+            const targetIcon = (() => {
+                switch (placedGate.gateId) {
+                    case 'cnot':
+                        return <CNOTGateIcon className="w-8 h-8 text-blue-400"/>;
+                    case 'cz':
+                        return <div className="w-3 h-3 bg-blue-400 rounded-full" />;
+                    default:
+                        return null;
+                }
+            })();
+
+            if (placedGate.gateId === 'swap') {
+                return (
+                     <motion.div
+                        key={placedGate.instanceId}
+                        layout
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.5 }}
+                        className="absolute z-10 cursor-pointer"
+                        style={{
+                            left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
+                            top: `${containerTop}px`,
+                            width: `${GATE_WIDTH}px`,
+                            height: `${containerHeight}px`,
+                        }}
+                        onClick={(e) => handleGateClick(e, placedGate.instanceId)}
+                    >
+                         <div className="relative w-full h-full hover:bg-cyan-500/10 rounded-lg transition-colors">
+                            <div
+                                className="absolute bg-blue-400"
+                                style={{
+                                    left: `calc(50% - 1px)`,
+                                    top: `${GATE_HEIGHT / 2}px`,
+                                    height: `${containerHeight - GATE_HEIGHT}px`,
+                                    width: '2px',
+                                }}
+                            />
+                             <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: isControlTop ? `${(GATE_HEIGHT / 2) - 12}px` : `${containerHeight - (GATE_HEIGHT / 2) - 12}px`, width: '24px', height: '24px'}}>
+                                <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
+                            </div>
+                            <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: isControlTop ? `${containerHeight - (GATE_HEIGHT / 2) - 12}px` : `${(GATE_HEIGHT / 2) - 12}px`, width: '24px', height: '24px'}}>
+                                <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
+                            </div>
+                            {isSelected && (
+                                <motion.div
+                                    className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
+                                    layoutId="selectionRing"
+                                    initial={{ opacity: 0, scale: 1.2 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.8}}
+                                />
+                            )}
+                        </div>
+                    </motion.div>
+                )
+            }
+
+
             return (
                 <motion.div
                   key={placedGate.instanceId}
@@ -107,13 +167,15 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
                     />
                     {/* Target Icon */}
                     <div
-                      className="absolute flex items-center justify-center w-8 h-8"
+                      className="absolute flex items-center justify-center"
                       style={{
-                        left: `calc(50% - 16px)`,
-                        top: isControlTop ? `${containerHeight - (GATE_HEIGHT / 2) - 16}px` : `${(GATE_HEIGHT / 2) - 16}px`,
+                        width: `${GATE_WIDTH}px`,
+                        height: `${GATE_HEIGHT}px`,
+                        left: `calc(50% - ${GATE_WIDTH/2}px)`,
+                        top: isControlTop ? `${containerHeight - GATE_HEIGHT}px` : `0px`,
                       }}
                     >
-                      <CNOTGateIcon className="w-8 h-8 text-blue-400"/>
+                      {targetIcon}
                     </div>
                      {/* Selection Highlight */}
                     {isSelected && (

@@ -20,7 +20,7 @@ class Complex {
 }
 
 // --- Quantum Gate Definitions (Matrices) ---
-const GATES = {
+const GATES: { [key: string]: Complex[][] } = {
   h: [
     [new Complex(1 / Math.sqrt(2)), new Complex(1 / Math.sqrt(2))],
     [new Complex(1 / Math.sqrt(2)), new Complex(-1 / Math.sqrt(2))],
@@ -28,6 +28,30 @@ const GATES = {
   x: [
     [new Complex(0), new Complex(1)],
     [new Complex(1), new Complex(0)],
+  ],
+  y: [
+    [new Complex(0), new Complex(0, -1)],
+    [new Complex(0, 1), new Complex(0)],
+  ],
+  z: [
+    [new Complex(1), new Complex(0)],
+    [new Complex(0), new Complex(-1)],
+  ],
+  s: [
+    [new Complex(1), new Complex(0)],
+    [new Complex(0), new Complex(0, 1)], // e^(i*pi/2) = i
+  ],
+  sdg: [
+    [new Complex(1), new Complex(0)],
+    [new Complex(0), new Complex(0, -1)], // e^(-i*pi/2) = -i
+  ],
+  t: [
+    [new Complex(1), new Complex(0)],
+    [new Complex(0), new Complex(Math.cos(Math.PI / 4), Math.sin(Math.PI / 4))], // e^(i*pi/4)
+  ],
+  tdg: [
+    [new Complex(1), new Complex(0)],
+    [new Complex(0), new Complex(Math.cos(-Math.PI / 4), Math.sin(-Math.PI / 4))], // e^(-i*pi/4)
   ],
 };
 
@@ -51,11 +75,27 @@ export const simulate = (placedGates: PlacedGate[], numQubits: number): Simulati
     switch (gate.gateId) {
       case 'h':
       case 'x':
+      case 'y':
+      case 'z':
+      case 's':
+      case 'sdg':
+      case 't':
+      case 'tdg':
         newStateVector = applySingleQubitGate(stateVector, gate.qubit, GATES[gate.gateId], numQubits);
         break;
       case 'cnot':
         if (gate.controlQubit !== undefined) {
           newStateVector = applyCNOT(stateVector, gate.controlQubit, gate.qubit, numQubits);
+        }
+        break;
+      case 'cz':
+        if (gate.controlQubit !== undefined) {
+          newStateVector = applyCZ(stateVector, gate.controlQubit, gate.qubit, numQubits);
+        }
+        break;
+      case 'swap':
+        if (gate.controlQubit !== undefined) {
+          newStateVector = applySWAP(stateVector, gate.qubit, gate.controlQubit, numQubits);
         }
         break;
       // 'measure' gate doesn't change the state vector in this simulation model
@@ -105,28 +145,60 @@ const applyCNOT = (
   numQubits: number
 ): Complex[] => {
   const newState = [...currentState];
+  const controlMask = 1 << (numQubits - 1 - controlQubit);
+  const targetMask = 1 << (numQubits - 1 - targetQubit);
+
   for (let i = 0; i < (1 << numQubits); i++) {
-    // Check if the control bit is 1
-    if ((i >> (numQubits - 1 - controlQubit)) & 1) {
-      // If control is 1, flip the target bit
-      const targetBitMask = 1 << (numQubits - 1 - targetQubit);
-      const flippedState = i ^ targetBitMask;
-      // Swap amplitudes
-      [newState[i], newState[flippedState]] = [currentState[flippedState], currentState[i]];
+    // If control bit is 1
+    if ((i & controlMask) !== 0) {
+      const flippedState = i ^ targetMask;
+      // Process each pair only once to avoid swapping back
+      if (i < flippedState) {
+        [newState[i], newState[flippedState]] = [currentState[flippedState], currentState[i]];
+      }
     }
   }
-  // Because we swap pairs, we only need to iterate through half the states where control is 1.
-  // This is a simplified way that works because we apply the swap twice.
-  // Correcting it by only applying when iterating:
-  const finalState = [...currentState];
+  return newState;
+};
+
+const applyCZ = (
+  currentState: Complex[],
+  controlQubit: number,
+  targetQubit: number,
+  numQubits: number
+): Complex[] => {
+  const newState = [...currentState];
+  const controlMask = 1 << (numQubits - 1 - controlQubit);
+  const targetMask = 1 << (numQubits - 1 - targetQubit);
   for (let i = 0; i < (1 << numQubits); i++) {
-      if ((i >> (numQubits - 1 - controlQubit)) & 1) {
-          const targetBitMask = 1 << (numQubits - 1 - targetQubit);
-          const flippedState = i ^ targetBitMask;
-          if (i < flippedState) { // Process each pair only once
-              [finalState[i], finalState[flippedState]] = [currentState[flippedState], currentState[i]];
-          }
-      }
+    // Apply phase flip if both control and target bits are 1
+    if ((i & controlMask) && (i & targetMask)) {
+      newState[i] = newState[i].multiply(new Complex(-1));
+    }
   }
-  return finalState;
+  return newState;
+};
+
+const applySWAP = (
+  currentState: Complex[],
+  qubit1: number,
+  qubit2: number,
+  numQubits: number
+): Complex[] => {
+  const newState = [...currentState];
+  const mask1 = 1 << (numQubits - 1 - qubit1);
+  const mask2 = 1 << (numQubits - 1 - qubit2);
+  for (let i = 0; i < (1 << numQubits); i++) {
+    const bit1 = (i & mask1) !== 0;
+    const bit2 = (i & mask2) !== 0;
+    // If bits are different, find the swapped state and swap amplitudes
+    if (bit1 !== bit2) {
+      const j = i ^ mask1 ^ mask2; // The state with the bits swapped
+      // Process each pair only once to avoid swapping back
+      if (i < j) {
+        [newState[i], newState[j]] = [currentState[j], currentState[i]];
+      }
+    }
+  }
+  return newState;
 };
