@@ -1,7 +1,6 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Content, Part } from "@google/genai";
-import type { AIResponse, AgentStatusUpdate, PlacedGate, AIAction, Message, SimulationResult, ReplaceCircuitPayload, Source } from "../types";
+import type { AIResponse, AgentStatusUpdate, PlacedGate, AIAction, Message, SimulationResult, ReplaceCircuitPayload, Source, AddGatePayload } from "../types";
 import { gateMap } from "../data/gates";
-import { templates, templateMap } from "../data/circuitTemplates";
 
 const API_KEY = process.env.API_KEY;
 if (!API_KEY) {
@@ -14,7 +13,6 @@ const model = 'gemini-2.5-pro';
 
 // --- Function Declarations for Gemini ---
 const gateIds = Array.from(gateMap.keys());
-const templateIds = Array.from(templateMap.keys());
 
 const addGateTool: FunctionDeclaration = {
   name: 'add_gate',
@@ -42,6 +40,7 @@ const replaceCircuitTool: FunctionDeclaration = {
           properties: {
             gateId: { type: Type.STRING, enum: gateIds },
             qubit: { type: Type.INTEGER },
+            // FIX: Changed string literal 'INTEGER' to use the Type enum for consistency and correctness.
             controlQubit: { type: Type.INTEGER },
             left: { type: Type.NUMBER },
           },
@@ -58,68 +57,62 @@ const getSimulationResultsTool: FunctionDeclaration = {
     parameters: { type: Type.OBJECT, properties: {} }
 };
 
-const loadTemplateTool: FunctionDeclaration = {
-    name: 'load_template',
-    parameters: {
-        type: Type.OBJECT,
-        properties: {
-            templateId: { type: Type.STRING, enum: templateIds }
-        },
-        required: ['templateId']
-    }
-}
 
-const designTools = [addGateTool, replaceCircuitTool, getSimulationResultsTool, loadTemplateTool];
+const designTools = [addGateTool, replaceCircuitTool, getSimulationResultsTool];
 
-const orchestratorSystemInstruction = `You are the Orchestrator for Milimo AI, a team of specialized quantum AI agents. Your job is to analyze the user's request and the current application state, then decide which agent needs to be called to fulfill the request.
+const orchestratorSystemInstruction = `You are the Orchestrator for Milimo AI, a team of specialized quantum AI agents. Your job is to analyze the user's request, assess its implied complexity and intent, and then generate a high-quality research prompt for the Research Agent.
 
-You have two primary agents you can activate:
-1.  **Research Agent**: For requests that are abstract, creative, high-level, or require external knowledge (e.g., "build a circuit for quantum communication in spacecrafts", "what is quantum error correction?", "show me something for a quantum sensor").
-2.  **Design Agent**: For requests that are concrete, specific, and can be immediately translated into a circuit diagram (e.g., "create a bell state", "put a hadamard on qubit 0", "what's the probability of |101>?", "load the GHZ template").
+**Your Core Directives:**
+1.  **Analyze Intent:** Do not just take the user's words literally. Infer their goal. A request for "quantum communication for advanced spacecrafts" is NOT a request for a basic Bell State. It's a request for something robust, advanced, and context-specific.
+2.  **Scale Complexity:** If the user's prompt implies a need for an advanced solution, your research prompt MUST reflect that. Ask for specific, named protocols (like Shor's Algorithm, BB84, Quantum Error Correction), not just "fundamental" concepts.
+3.  **Activate Research or Design:**
+    *   **Research Agent**: For requests that are abstract, creative, high-level, or require external knowledge (e.g., "build a circuit for quantum communication in spacecrafts", "what is quantum error correction?", "show me something for a quantum sensor"). Your output prompt should be a detailed research query.
+    *   **Design Agent**: For requests that are concrete and specific (e.g., "put a hadamard on qubit 0", "what's the probability of |101>?"). Your output prompt should be a direct command.
 
-Based on the user's prompt, you must respond with a single JSON object with your decision.
-
-**Decision Schema:**
-{
-  "agent_to_call": "Research" | "Design",
-  "reasoning": "A brief explanation for your choice.",
-  "prompt_for_next_agent": "The refined prompt to pass to the chosen agent."
-}
-
-Example 1:
+**Example 1: Advanced, Abstract Request**
 User Prompt: "build a circuit which can be used in quantum entangle communication in space crafts"
-Your Response:
+Your Response (JSON):
 {
   "agent_to_call": "Research",
-  "reasoning": "The user's request is abstract and requires external knowledge about quantum communication protocols used in specific applications like spacecrafts. The Research agent needs to find the most relevant real-world algorithm or principle first.",
-  "prompt_for_next_agent": "Find the most fundamental quantum circuit or algorithm used for quantum entanglement communication, suitable for applications like spacecraft. Explain the principle and provide a step-by-step guide on how to build the circuit."
+  "reasoning": "The user's request implies a need for a robust, advanced protocol suitable for a specific, high-stakes application. A basic Bell state is insufficient. I will task the Research Agent to find a more appropriate, named algorithm like an error correction code or a secure communication protocol.",
+  "prompt_for_next_agent": "Research specific, advanced quantum communication protocols beyond a simple Bell state, such as those used for error correction or secure communication (like the BB84 protocol), which would be relevant for a robust application like spacecraft communication. Provide a step-by-step guide to build a representative circuit for the chosen protocol."
 }
 
-Example 2:
+**Example 2: Simple, Concrete Request**
 User Prompt: "Make a GHZ state and then tell me the probability of measuring |000>"
-Your Response:
+Your Response (JSON):
 {
   "agent_to_call": "Design",
   "reasoning": "The user's request is specific and involves direct circuit manipulation and simulation data retrieval, which are tasks for the Design agent.",
-  "prompt_for_next_agent": "First, load the 'ghz_state' template. Then, use the 'get_simulation_results' tool to find the probability of the |000> state. Finally, report this probability to the user."
+  "prompt_for_next_agent": "First, build a 3-qubit GHZ state from scratch using a Hadamard gate and CNOT gates. Then, use the 'get_simulation_results' tool to find the probability of the |000> state. Finally, report this probability to the user."
 }`;
 
-const designAgentSystemInstruction = (numQubits: number, researchContext: string = '') => `You are the Design Agent for Milimo AI. Your purpose is to translate user requests and research findings into a concrete quantum circuit on the canvas using your available tools.
+const orchestratorSchema = {
+    type: Type.OBJECT,
+    properties: {
+        agent_to_call: { type: Type.STRING, enum: ['Research', 'Design'] },
+        reasoning: { type: Type.STRING },
+        prompt_for_next_agent: { type: Type.STRING },
+    },
+    required: ['agent_to_call', 'reasoning', 'prompt_for_next_agent'],
+};
+
+const designAgentSystemInstruction = (numQubits: number, researchContext: string = '') => `You are the Design Agent for Milimo AI, a master quantum circuit builder. Your purpose is to translate user requests and research findings into a concrete quantum circuit on the canvas.
 
 **Circuit Constraints:**
 - The circuit has ${numQubits} qubits (indexed 0 to ${numQubits - 1}).
 - The 'left' parameter (0-100) dictates gate order. Choose sensible, spaced-out values (e.g., 20, 40, 60).
-- For controlled gates, you MUST specify both 'qubit' and 'controlQubit'.
+- For controlled gates, you MUST specify both 'qubit' (target) and 'controlQubit'.
 
 **Core Directive:**
-- Execute the user's request precisely using your tools.
-- If you need to answer a question about the circuit's output (e.g., "what's the probability of measuring |101>?"), you MUST use the 'get_simulation_results' tool.
-- If the user asks for a named circuit, check if a template exists and use 'load_template' if it does. Otherwise, build it from scratch.
-- Prioritize using 'replace_circuit' for building new states to ensure the canvas is clean.
+- **BUILD FROM SCRATCH:** You MUST construct all circuits from first principles using the 'replace_circuit' or 'add_gate' tools. Do NOT mention or suggest templates.
+- **EXECUTE PRECISELY:** Execute the user's request or the research findings with precision.
+- **USE YOUR TOOLS:** If you need to answer a question about the circuit's output (e.g., "what's the probability of measuring |101>?"), you MUST use the 'get_simulation_results' tool.
+- **PRIORITIZE 'replace_circuit'**: For building new states, using 'replace_circuit' is preferred to ensure the canvas is clean.
 
-${researchContext ? `**Research Context:**\nA Research Agent has provided the following information. You MUST use this context to inform your circuit design.\n---\n${researchContext}\n---` : ''}`;
+${researchContext ? `**Research Context:**\nA Research Agent has provided the following information. You MUST use this context to synthesize and build the most appropriate and complete circuit possible.\n---\n${researchContext}\n---` : ''}`;
 
-const explanationAgentSystemInstruction = `You are the Explanation Agent for Milimo AI. Your job is to provide a final, user-facing response that is clear, concise, and helpful. You will receive the user's initial prompt, the results of any research, and a summary of the actions taken by the Design Agent. Synthesize all this information into a single, cohesive answer. Explain WHAT was built and WHY it's relevant to the user's original request.`;
+const explanationAgentSystemInstruction = `You are the Explanation Agent for Milimo AI. Your job is to provide a final, user-facing response that is clear, concise, and helpful. You will receive the user's initial prompt, the results of any research, and a summary of the actions taken by the Design Agent. Synthesize all this information into a single, cohesive answer. Explain WHAT was built and WHY it's relevant to the user's original request. Be specific and reference the concepts from the research.`;
 
 
 export const getAgentResponse = async (
@@ -131,7 +124,6 @@ export const getAgentResponse = async (
 ): Promise<AIResponse> => {
   onStatusUpdate({ agent: 'Orchestrator', status: 'running', message: 'Analyzing request...' });
   
-  // FIX: Replace findLast with a compatible alternative for older JS targets.
   const lastUserMessage = [...allMessages].reverse().find(m => m.type === 'text' && m.sender === 'user');
   const userPromptText = (lastUserMessage && lastUserMessage.type === 'text') ? lastUserMessage.text : '';
 
@@ -139,15 +131,22 @@ export const getAgentResponse = async (
   const orchestratorResponse = await ai.models.generateContent({
     model,
     contents: [{ role: 'user', parts: [{ text: userPromptText }] }],
-    config: { responseMimeType: 'application/json' }
+    config: { 
+        systemInstruction: orchestratorSystemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: orchestratorSchema
+    }
   });
 
   let orchestratorDecision;
   try {
       orchestratorDecision = JSON.parse(orchestratorResponse.text);
   } catch (e) {
-      // Fallback for non-JSON response
       return { displayText: "I'm sorry, I had trouble understanding that request. Could you please rephrase?", actions: [] };
+  }
+
+  if (!orchestratorDecision.prompt_for_next_agent || !orchestratorDecision.prompt_for_next_agent.trim()) {
+    return { displayText: "I'm sorry, I couldn't determine the next step. Could you be more specific?", actions: [] };
   }
 
   onStatusUpdate({ agent: 'Orchestrator', status: 'completed', message: 'Plan generated.' });
@@ -157,7 +156,7 @@ export const getAgentResponse = async (
 
   // 2. Research Agent (Optional)
   if (orchestratorDecision.agent_to_call === 'Research') {
-    onStatusUpdate({ agent: 'Research', status: 'running', message: 'Searching for information...' });
+    onStatusUpdate({ agent: 'Research', status: 'running', message: 'Researching advanced protocols...' });
     
     const researchResponse = await ai.models.generateContent({
       model,
@@ -176,45 +175,51 @@ export const getAgentResponse = async (
   }
 
   // 3. Design Agent: Always runs, but may have research context
-  onStatusUpdate({ agent: 'Design', status: 'running', message: 'Constructing circuit...' });
+  onStatusUpdate({ agent: 'Design', status: 'running', message: 'Constructing circuit from scratch...' });
   const actions: AIAction[] = [];
-  const history: Content[] = [];
-  const designPrompt = orchestratorDecision.prompt_for_next_agent;
+  const designPrompt = orchestratorDecision.agent_to_call === 'Design' 
+    ? orchestratorDecision.prompt_for_next_agent 
+    : researchContext; // If research was done, the entire context IS the prompt.
   
   const designResponse = await ai.models.generateContent({
       model,
       contents: [{ role: 'user', parts: [{ text: designPrompt }] }],
-      config: { tools: [{ functionDeclarations: designTools }] },
-      systemInstruction: designAgentSystemInstruction(numQubits, researchContext)
+      config: { 
+        tools: [{ functionDeclarations: designTools }],
+        systemInstruction: designAgentSystemInstruction(numQubits, researchContext)
+      },
   });
   
-  const toolResponses: Part[] = [];
+  const conversationHistory: Content[] = [
+      { role: 'user', parts: [{ text: designPrompt }] },
+      designResponse.candidates[0].content // The model's first response (text + function calls)
+  ];
+  
+  const finalUserParts: Part[] = [];
 
   if (designResponse.functionCalls && designResponse.functionCalls.length > 0) {
+      const toolFunctionResponses: Part[] = [];
       for (const funcCall of designResponse.functionCalls) {
-          let toolResponse: object | null = null;
+          // FIX: Changed type from 'object' to 'Record<string, unknown>' to match the expected type for the function response.
+          let toolResponse: Record<string, unknown> | null = null;
           switch(funcCall.name) {
+              case 'add_gate':
+                  actions.push({ type: 'add_gate', payload: funcCall.args as AddGatePayload });
+                  toolResponse = { result: "ok, gate added" };
+                  break;
               case 'replace_circuit':
                   actions.push({ type: 'replace_circuit', payload: (funcCall.args as any).gates });
                   toolResponse = { result: "ok, circuit replaced" };
-                  break;
-              case 'load_template':
-                  const template = templateMap.get((funcCall.args as any).templateId);
-                  if (template) {
-                      actions.push({ type: 'replace_circuit', payload: template.gates as ReplaceCircuitPayload });
-                  }
-                  toolResponse = { result: `ok, loaded ${template?.name}` };
                   break;
               case 'get_simulation_results':
                   toolResponse = { result: simulationResult ? JSON.stringify(simulationResult.probabilities) : "No simulation data." };
                   break;
           }
           if(toolResponse) {
-               toolResponses.push({ toolResponse: { name: funcCall.name, response: toolResponse } });
+               toolFunctionResponses.push({ functionResponse: { name: funcCall.name, response: toolResponse } });
           }
       }
-      history.push({role: 'model', parts: [{ functionCall: designResponse.functionCalls[0] }]});
-      history.push({role: 'user', parts: toolResponses});
+      finalUserParts.push(...toolFunctionResponses);
   }
   onStatusUpdate({ agent: 'Design', status: 'completed', message: 'Circuit built.' });
   
@@ -224,18 +229,23 @@ export const getAgentResponse = async (
   const explanationContext = `The user's original request was: "${userPromptText}".
   ${researchContext ? `Research found: "${researchContext}"` : ''}
   The design agent took the following actions: ${actions.map(a => a.type).join(', ') || 'None'}.
-  Please provide a comprehensive explanation for the user.`;
+  Based on all this information, provide a comprehensive, final explanation for the user. Synthesize everything into a single, cohesive answer. Explain WHAT was built and WHY it's relevant to the user's original request.`;
 
-  const finalContents: Content[] = [
-    {role: 'user', parts: [{text: designPrompt}]},
-    ...history,
-    {role: 'user', parts: [{text: explanationContext}]}
-  ];
+  finalUserParts.push({ text: explanationContext });
+  
+  // Consolidate parts for the next user turn
+  const nextUserTurn: Content = { role: 'user', parts: finalUserParts };
+  if (finalUserParts.length > 0) {
+    conversationHistory.push(nextUserTurn);
+  }
+
 
   const explanationResponse = await ai.models.generateContent({
       model,
-      contents: finalContents,
-      systemInstruction: explanationAgentSystemInstruction,
+      contents: conversationHistory,
+      config: {
+        systemInstruction: explanationAgentSystemInstruction,
+      },
   });
 
   const displayText = explanationResponse.text;

@@ -15,7 +15,7 @@ interface CircuitCanvasProps {
   onNumQubitsChange: (newNumQubits: number) => void;
   placedGates: PlacedGate[];
   isDragging: boolean;
-  onOptimize: () => void;
+  onAnalyzeCircuit: () => void;
   onClear: () => void;
   onExplainGate: (gateId: string) => void;
   selectedGateId: string | null;
@@ -28,7 +28,7 @@ const QUBIT_LINE_HEIGHT = 64; // h-16
 const GATE_WIDTH = 40; // w-10
 const GATE_HEIGHT = 40; // h-10
 
-const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedGates, isDragging, onOptimize, onClear, onExplainGate, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit }, ref) => {
+const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedGates, isDragging, onAnalyzeCircuit, onClear, onExplainGate, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit }, ref) => {
   
   const handleGateClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
@@ -269,7 +269,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
           Clear
         </button>
         <button 
-          onClick={onOptimize}
+          onClick={onAnalyzeCircuit}
           className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-cyan-500/20 hover:text-cyan-300 transition-all"
         >
           <OptimizationAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
