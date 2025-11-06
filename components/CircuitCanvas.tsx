@@ -4,11 +4,13 @@ import type { PlacedGate } from '../types';
 import { gateMap } from '../data/gates';
 import CNOTGateIcon from './icons/CNOTGateIcon';
 import OptimizationAgentIcon from './icons/OptimizationAgentIcon';
+import TrashIcon from './icons/TrashIcon';
 
 interface CircuitCanvasProps {
   placedGates: PlacedGate[];
   isDragging: boolean;
   onOptimize: () => void;
+  onClear: () => void;
   selectedGateId: string | null;
   onSelectGate: (instanceId: string) => void;
 }
@@ -18,7 +20,7 @@ const QUBIT_LINE_HEIGHT = 64; // h-16
 const GATE_WIDTH = 40; // w-10
 const GATE_HEIGHT = 40; // h-10
 
-const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGates, isDragging, onOptimize, selectedGateId, onSelectGate }, ref) => {
+const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGates, isDragging, onOptimize, onClear, selectedGateId, onSelectGate }, ref) => {
   
   const handleGateClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
@@ -48,35 +50,6 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
           </div>
         ))}
 
-        {/* Render CNOT lines first */}
-        {placedGates.map(placedGate => {
-          const gateInfo = gateMap.get(placedGate.gateId);
-          if (gateInfo?.type !== 'control' || placedGate.controlQubit === undefined) return null;
-
-          const targetY = (placedGate.qubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
-          const controlY = (placedGate.controlQubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
-
-          const top = Math.min(targetY, controlY);
-          const height = Math.abs(targetY - controlY);
-
-          return (
-             <motion.div
-                key={`${placedGate.instanceId}-line`}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="absolute bg-blue-400"
-                style={{
-                  left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px + ${GATE_WIDTH / 2}px)`,
-                  top: `${top}px`,
-                  height: `${height}px`,
-                  width: '2px',
-                  transform: 'translateX(-1px)'
-                }}
-             />
-          );
-        })}
-
-
         {/* Placed Gates */}
         <AnimatePresence>
         {placedGates.map(placedGate => {
@@ -88,63 +61,72 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
           const isSelected = placedGate.instanceId === selectedGateId;
 
           if (gateInfo.type === 'control') {
-            const controlY = (placedGate.controlQubit! * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
+            if (placedGate.controlQubit === undefined) return null;
+            const controlY = (placedGate.controlQubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
+            
+            const containerTop = Math.min(top, controlY) - (GATE_HEIGHT / 2);
+            const containerHeight = Math.abs(top - controlY) + GATE_HEIGHT;
+            
+            const isControlTop = controlY < top;
+
             return (
-              <React.Fragment key={placedGate.instanceId}>
-                 {/* Clickable area for control gates */}
-                <div
-                  className="absolute z-20 cursor-pointer"
+                <motion.div
+                  key={placedGate.instanceId}
+                  layout
+                  initial={{ opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.5 }}
+                  className="absolute z-10 cursor-pointer"
                   style={{
-                    left: `calc(${placedGate.left}% - ${GATE_WIDTH/2}px)`,
-                    top: `${Math.min(top, controlY) - GATE_HEIGHT/2}px`,
+                    left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
+                    top: `${containerTop}px`,
                     width: `${GATE_WIDTH}px`,
-                    height: `${Math.abs(top - controlY) + GATE_HEIGHT}px`,
+                    height: `${containerHeight}px`,
                   }}
                   onClick={(e) => handleGateClick(e, placedGate.instanceId)}
-                />
-                {/* Selection Highlight */}
-                {isSelected && (
-                   <motion.div
-                      layoutId="selectionRing"
-                      className="absolute rounded-full border-2 border-cyan-400"
-                      style={{
-                        left: `calc(${placedGate.left}% - 24px)`,
-                        top: `${top - 24}px`,
-                        width: '48px',
-                        height: '48px',
-                      }}
-                      initial={{ opacity: 0, scale: 1.2 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.8}}
-                   />
-                )}
-                {/* Control Dot */}
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.5 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.5 }}
-                  className="absolute w-3 h-3 bg-blue-400 rounded-full"
-                  style={{
-                    left: `calc(${placedGate.left}% - 6px)`,
-                    top: `${controlY - 6}px`,
-                    pointerEvents: 'none',
-                  }}
-                />
-                {/* Target Icon */}
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.5 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.5 }}
-                  className="absolute flex items-center justify-center w-8 h-8 z-10"
-                  style={{
-                    left: `calc(${placedGate.left}% - 16px)`,
-                    top: `${top - 16}px`,
-                    pointerEvents: 'none',
-                  }}
                 >
-                  <CNOTGateIcon className="w-8 h-8 text-blue-400"/>
+                  {/* Container for relative positioning */}
+                  <div className="relative w-full h-full hover:bg-cyan-500/10 rounded-lg transition-colors">
+                    {/* Line */}
+                    <div
+                      className="absolute bg-blue-400"
+                      style={{
+                        left: `calc(50% - 1px)`,
+                        top: `${GATE_HEIGHT / 2}px`,
+                        height: `${containerHeight - GATE_HEIGHT}px`,
+                        width: '2px',
+                      }}
+                    />
+                    {/* Control Dot */}
+                    <div
+                      className="absolute w-3 h-3 bg-blue-400 rounded-full"
+                      style={{
+                        left: `calc(50% - 6px)`,
+                        top: isControlTop ? `${(GATE_HEIGHT / 2) - 6}px` : `${containerHeight - (GATE_HEIGHT / 2) - 6}px`,
+                      }}
+                    />
+                    {/* Target Icon */}
+                    <div
+                      className="absolute flex items-center justify-center w-8 h-8"
+                      style={{
+                        left: `calc(50% - 16px)`,
+                        top: isControlTop ? `${containerHeight - (GATE_HEIGHT / 2) - 16}px` : `${(GATE_HEIGHT / 2) - 16}px`,
+                      }}
+                    >
+                      <CNOTGateIcon className="w-8 h-8 text-blue-400"/>
+                    </div>
+                     {/* Selection Highlight */}
+                    {isSelected && (
+                      <motion.div
+                          className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
+                          layoutId="selectionRing"
+                          initial={{ opacity: 0, scale: 1.2 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.8}}
+                        />
+                    )}
+                  </div>
                 </motion.div>
-              </React.Fragment>
             )
           }
 
@@ -180,13 +162,21 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
         </AnimatePresence>
       </div>
       
-      <div className="absolute top-2 right-4">
+      <div className="absolute top-2 right-4 flex items-center gap-2">
+         <button 
+          onClick={onClear}
+          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-red-500/20 hover:text-red-300 transition-all"
+          title="Clear Circuit"
+        >
+          <TrashIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
+          Clear
+        </button>
         <button 
           onClick={onOptimize}
           className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-cyan-500/20 hover:text-cyan-300 transition-all"
         >
           <OptimizationAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
-          Optimize Circuit
+          Optimize
         </button>
       </div>
 

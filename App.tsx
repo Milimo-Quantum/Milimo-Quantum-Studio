@@ -8,6 +8,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
 import { getAgentResponse } from './services/geminiService';
 import { simulate } from './services/quantumSimulator';
+import { gateMap } from './data/gates';
 
 const NUM_QUBITS = 3;
 
@@ -130,6 +131,11 @@ const App: React.FC = () => {
   const handleOptimize = useCallback(() => {
     handleSend("Optimize my current circuit");
   }, [handleSend]);
+  
+  const handleClearCircuit = useCallback(() => {
+    setPlacedGates([]);
+    setSelectedGateId(null);
+  }, []);
 
   const handleShowVisualization = useCallback(() => {
     setActiveTab('visualization');
@@ -155,12 +161,23 @@ const App: React.FC = () => {
       const canvasContentWidth = canvasRect.width - PADDING * 2;
       const leftPercent = Math.max(0, Math.min(100, (relativeX / canvasContentWidth) * 100));
 
+      const gateInfo = gateMap.get(gateId);
       const newGate: PlacedGate = {
         instanceId: `${gateId}-${Date.now()}`,
         gateId: gateId,
         qubit: qubitIndex,
         left: leftPercent,
       };
+
+      // Intelligent Default Placement for CNOT
+      if (gateInfo?.type === 'control') {
+        if (qubitIndex < NUM_QUBITS - 1) {
+          newGate.controlQubit = qubitIndex + 1; // Default to line below
+        } else {
+          newGate.controlQubit = qubitIndex - 1; // Default to line above if on last qubit
+        }
+      }
+
       setPlacedGates(prev => [...prev, newGate]);
     }
   };
@@ -210,6 +227,7 @@ const App: React.FC = () => {
               placedGates={placedGates} 
               isDragging={isDragging} 
               onOptimize={handleOptimize}
+              onClear={handleClearCircuit}
               selectedGateId={selectedGateId}
               onSelectGate={handleSelectGate}
             />
