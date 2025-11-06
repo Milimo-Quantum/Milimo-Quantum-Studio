@@ -3,12 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { PlacedGate } from '../types';
 import { gateMap } from '../data/gates';
 import CNOTGateIcon from './icons/CNOTGateIcon';
-import OptimizationAgentIcon from './icons/OptimizationAgentIcon';
 import TrashIcon from './icons/TrashIcon';
 import SwapTargetIcon from './icons/SwapTargetIcon';
 import ExplanationAgentIcon from './icons/ExplanationAgentIcon';
 import PlusIcon from './icons/PlusIcon';
 import MinusIcon from './icons/MinusIcon';
+import ResearchAgentIcon from './icons/ResearchAgentIcon';
 
 interface CircuitCanvasProps {
   numQubits: number;
@@ -272,7 +272,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
           onClick={onAnalyzeCircuit}
           className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-cyan-500/20 hover:text-cyan-300 transition-all"
         >
-          <OptimizationAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
+          <ResearchAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
           Analyze Circuit
         </button>
       </div>

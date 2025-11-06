@@ -7,6 +7,8 @@ import { getQubitBlochSphereCoordinates } from '../services/quantumSimulator';
 const SPHERE_SIZE = 220;
 const RADIUS = SPHERE_SIZE / 2;
 
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
 const BlochSphere: React.FC<{ x: number; y: number; z: number }> = ({ x, y, z }) => {
   const [isDragging, setIsDragging] = useState(false);
   const sphereRef = useRef<HTMLDivElement>(null);
@@ -43,7 +45,10 @@ const BlochSphere: React.FC<{ x: number; y: number; z: number }> = ({ x, y, z })
   const vectorLength = Math.sqrt(x * x + y * y + z * z);
   // Spherical coordinates from Cartesian
   const phi = Math.atan2(y, x); // Azimuthal angle (from x-axis in xy-plane)
-  const theta = Math.acos(z / (vectorLength || 1)); // Polar angle (from z-axis)
+  
+  // SOTA FIX: Clamp the value to prevent Math.acos from returning NaN due to floating point inaccuracies
+  const clampedZ = clamp(z / (vectorLength || 1), -1, 1);
+  const theta = Math.acos(clampedZ); // Polar angle (from z-axis)
 
   return (
     <div

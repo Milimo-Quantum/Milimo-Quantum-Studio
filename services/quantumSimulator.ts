@@ -55,6 +55,10 @@ const GATES: { [key: string]: Complex[][] } = {
   ],
 };
 
+const isValidQubit = (qubit: number | undefined, numQubits: number) => {
+    return qubit !== undefined && qubit >= 0 && qubit < numQubits;
+}
+
 /**
  * Simulates a quantum circuit and returns the measurement probabilities.
  * @param placedGates The array of gates placed on the canvas.
@@ -63,13 +67,18 @@ const GATES: { [key: string]: Complex[][] } = {
  */
 export const simulate = (placedGates: PlacedGate[], numQubits: number): SimulationResult => {
   const numStates = 1 << numQubits;
-  let stateVector: Complex[] = Array(numStates).fill(new Complex(0));
+  let stateVector: Complex[] = Array.from({ length: numStates }, () => new Complex(0));
   stateVector[0] = new Complex(1); // Initialize to |00...0>
 
   const sortedGates = [...placedGates].sort((a, b) => a.left - b.left);
 
   for (const gate of sortedGates) {
     let newStateVector = [...stateVector];
+
+    if (!isValidQubit(gate.qubit, numQubits) || (gate.controlQubit !== undefined && !isValidQubit(gate.controlQubit, numQubits))) {
+        console.warn('Skipping invalid gate in simulation:', gate);
+        continue;
+    }
 
     switch (gate.gateId) {
       case 'h':
@@ -123,8 +132,9 @@ const applySingleQubitGate = (
   matrix: Complex[][],
   numQubits: number
 ): Complex[] => {
-  const newState = Array(1 << numQubits).fill(new Complex(0));
-  for (let i = 0; i < (1 << numQubits); i++) {
+  const numStates = 1 << numQubits;
+  const newState = Array.from({ length: numStates }, () => new Complex(0));
+  for (let i = 0; i < numStates; i++) {
     const bit = (i >> (numQubits - 1 - qubit)) & 1;
     const basisStateWithoutQubit = i & ~(1 << (numQubits - 1 - qubit));
 
@@ -229,7 +239,7 @@ export const getQubitBlochSphereCoordinates = (
   qubit: number,
   numQubits: number
 ): { x: number; y: number; z: number } => {
-  if (stateVectorComplex.length === 0) return { x: 0, y: 0, z: 1 };
+  if (stateVectorComplex.length === 0 || !isValidQubit(qubit, numQubits)) return { x: 0, y: 0, z: 1 };
   
   const stateVector = stateVectorComplex.map(c => new Complex(c.re, c.im));
   

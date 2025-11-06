@@ -10,6 +10,8 @@ import { getAgentResponse } from './services/geminiService';
 import { simulate } from './services/quantumSimulator';
 import { gateMap } from './data/gates';
 
+export const ANALYZE_PROMPT = "Analyze my current circuit. Identify its purpose if it's a known algorithm or state, explain the principles behind it, and propose potential next steps or interesting modifications.";
+
 const App: React.FC = () => {
   const [numQubits, setNumQubits] = useState(3);
   const [placedGates, setPlacedGates] = useState<PlacedGate[]>([]);
@@ -52,21 +54,32 @@ const App: React.FC = () => {
 
 
   const executeActions = useCallback((actions: AIAction[]) => {
+    const isValidGate = (gate: Omit<PlacedGate, 'instanceId' | 'isSelected'>) => {
+      const targetQubitValid = gate.qubit >= 0 && gate.qubit < numQubits;
+      const controlQubitValid = gate.controlQubit === undefined || (gate.controlQubit >= 0 && gate.controlQubit < numQubits);
+      return targetQubitValid && controlQubitValid;
+    };
+    
     actions.forEach(action => {
       switch (action.type) {
         case 'clear_circuit':
           setPlacedGates([]);
           break;
         case 'add_gate': {
-          const newGate: PlacedGate = {
-            ...action.payload,
-            instanceId: `${action.payload.gateId}-${Date.now()}`,
-          };
-          setPlacedGates(prev => [...prev, newGate]);
+          if (isValidGate(action.payload)) {
+            const newGate: PlacedGate = {
+              ...action.payload,
+              instanceId: `${action.payload.gateId}-${Date.now()}`,
+            };
+            setPlacedGates(prev => [...prev, newGate]);
+          } else {
+            console.warn('AI tried to place an invalid gate:', action.payload);
+          }
           break;
         }
         case 'replace_circuit': {
-          const gatesWithIds = action.payload.map((g, i) => ({
+          const validGates = action.payload.filter(isValidGate);
+          const gatesWithIds = validGates.map((g, i) => ({
             ...g,
             instanceId: `${g.gateId}-${Date.now()}-${i}`,
           }));
@@ -80,7 +93,7 @@ const App: React.FC = () => {
           console.warn('Unknown AI action:', action);
       }
     });
-  }, []);
+  }, [numQubits]);
 
   const handleSend = useCallback(async (prompt: string) => {
     if (prompt.trim() === '' || isAiLoading) return;
@@ -134,7 +147,7 @@ const App: React.FC = () => {
   }, [isAiLoading, placedGates, messages, executeActions, simulationResult, numQubits]);
 
   const handleAnalyzeCircuit = useCallback(() => {
-    handleSend("Analyze my current circuit. Identify its purpose if it's a known algorithm or state, explain the principles behind it, and propose potential next steps or interesting modifications.");
+    handleSend(ANALYZE_PROMPT);
   }, [handleSend]);
   
   const handleClearCircuit = useCallback(() => {
