@@ -16,11 +16,11 @@ interface RightPanelProps {
   setActiveTab: (tab: Tab) => void;
   placedGates: PlacedGate[];
   visualizedQubit: number;
+  numQubits: number;
 }
-const NUM_QUBITS = 3;
 
 const RightPanel: React.FC<RightPanelProps> = (props) => {
-  const { activeTab, setActiveTab, simulationResult, placedGates, visualizedQubit } = props;
+  const { activeTab, setActiveTab, simulationResult, placedGates, visualizedQubit, numQubits } = props;
 
   const tabs: { id: Tab, label: string }[] = [
     { id: 'copilot', label: 'Milimo AI' },
@@ -58,8 +58,8 @@ const RightPanel: React.FC<RightPanelProps> = (props) => {
       <div className="relative flex-1 min-h-0">
         <AnimatePresence mode="wait">
           {activeTab === 'copilot' && <CopilotChat {...props} />}
-          {activeTab === 'visualization' && <VisualizationPanel result={simulationResult} visualizedQubit={visualizedQubit} numQubits={NUM_QUBITS} />}
-          {activeTab === 'code' && <CodePanel placedGates={placedGates} />}
+          {activeTab === 'visualization' && <VisualizationPanel result={simulationResult} visualizedQubit={visualizedQubit} numQubits={numQubits} />}
+          {activeTab === 'code' && <CodePanel placedGates={placedGates} numQubits={numQubits} />}
         </AnimatePresence>
       </div>
     </motion.aside>

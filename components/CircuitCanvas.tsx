@@ -7,8 +7,12 @@ import OptimizationAgentIcon from './icons/OptimizationAgentIcon';
 import TrashIcon from './icons/TrashIcon';
 import SwapTargetIcon from './icons/SwapTargetIcon';
 import ExplanationAgentIcon from './icons/ExplanationAgentIcon';
+import PlusIcon from './icons/PlusIcon';
+import MinusIcon from './icons/MinusIcon';
 
 interface CircuitCanvasProps {
+  numQubits: number;
+  onNumQubitsChange: (newNumQubits: number) => void;
   placedGates: PlacedGate[];
   isDragging: boolean;
   onOptimize: () => void;
@@ -20,12 +24,11 @@ interface CircuitCanvasProps {
   setVisualizedQubit: (qubitIndex: number) => void;
 }
 
-const NUM_QUBITS = 3;
 const QUBIT_LINE_HEIGHT = 64; // h-16
 const GATE_WIDTH = 40; // w-10
 const GATE_HEIGHT = 40; // h-10
 
-const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGates, isDragging, onOptimize, onClear, onExplainGate, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit }, ref) => {
+const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedGates, isDragging, onOptimize, onClear, onExplainGate, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit }, ref) => {
   
   const handleGateClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
@@ -53,7 +56,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
       
       <div className="relative w-full h-full flex flex-col justify-start z-0">
         {/* Qubit Lines */}
-        {[...Array(NUM_QUBITS)].map((_, i) => (
+        {[...Array(numQubits)].map((_, i) => (
            <div
             key={`qubit-${i}`}
             className="relative flex items-center group cursor-pointer"
@@ -225,7 +228,21 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
             </motion.div>
           )
         })}
+        {/* FIX: Corrected typo from AnatePresence to AnimatePresence */}
         </AnimatePresence>
+      </div>
+      
+      <div className="absolute top-2 left-4 flex items-center gap-2">
+         <div className="flex items-center gap-2 bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md">
+            <span className="text-xs font-mono">Qubits:</span>
+            <button onClick={() => onNumQubitsChange(numQubits - 1)} disabled={numQubits <= 2} className="disabled:opacity-30 enabled:hover:text-white transition-colors">
+                <MinusIcon className="w-3.5 h-3.5" />
+            </button>
+            <span className="font-mono font-semibold text-base text-gray-200 w-4 text-center">{numQubits}</span>
+            <button onClick={() => onNumQubitsChange(numQubits + 1)} disabled={numQubits >= 5} className="disabled:opacity-30 enabled:hover:text-white transition-colors">
+                 <PlusIcon className="w-3.5 h-3.5" />
+            </button>
+        </div>
       </div>
       
       <div className="absolute top-2 right-4 flex items-center gap-2">

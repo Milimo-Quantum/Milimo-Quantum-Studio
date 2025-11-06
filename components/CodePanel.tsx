@@ -6,10 +6,11 @@ import LogoIcon from './icons/LogoIcon';
 
 interface CodePanelProps {
   placedGates: PlacedGate[];
+  numQubits: number;
 }
 
-const CodePanel: React.FC<CodePanelProps> = ({ placedGates }) => {
-  const code = useMemo(() => generateQiskitCode(placedGates), [placedGates]);
+const CodePanel: React.FC<CodePanelProps> = ({ placedGates, numQubits }) => {
+  const code = useMemo(() => generateQiskitCode(placedGates, numQubits), [placedGates, numQubits]);
 
   return (
     <motion.div

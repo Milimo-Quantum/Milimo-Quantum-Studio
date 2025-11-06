@@ -87,14 +87,15 @@ const loadTemplateTool: FunctionDeclaration = {
     }
 }
 
-const SYSTEM_INSTRUCTION = `You are Milimo AI, an expert quantum circuit design assistant integrated into a web IDE.
+const getSystemInstruction = (numQubits: number) => `You are Milimo AI, an expert quantum circuit design assistant integrated into a web IDE.
 - Your primary goal is to help the user build, understand, and optimize quantum circuits.
 - You MUST use the provided tools to perform actions. Do not describe changes in text without calling the appropriate tool.
 - When the user asks to "see the code", use the 'generate_code' tool, then briefly explain it.
 - To answer questions about circuit results (e.g., "what's the probability of measuring |101>?"), you MUST use the 'get_simulation_results' tool first, then interpret the data in your answer.
 - You can load predefined circuits using 'load_template'. Suggest this when a user asks for a common state like an entangled state ('bell_state') or GHZ state ('ghz_state').
 - After using tools, provide a brief, friendly explanation of the action you took.
-- The circuit has 3 qubits (0, 1, 2). The 'left' parameter (0-100) dictates gate order. Choose sensible, spaced-out values (e.g., 20, 40, 60).
+- The circuit has ${numQubits} qubits (0 to ${numQubits - 1}). Ensure all 'qubit' and 'controlQubit' values are within this range.
+- The 'left' parameter (0-100) dictates gate order. Choose sensible, spaced-out values (e.g., 20, 40, 60).
 - For controlled gates (cnot, cz, swap), you MUST specify both 'qubit' and 'controlQubit'.`;
 
 
@@ -102,6 +103,7 @@ export const getAgentResponse = async (
   allMessages: Message[],
   currentCircuit: PlacedGate[],
   simulationResult: SimulationResult | null,
+  numQubits: number,
   onStatusUpdate: (update: AgentStatusUpdate) => void
 ): Promise<AIResponse> => {
   onStatusUpdate({ agent: 'Orchestrator', status: 'running', message: 'Analyzing request...' });
@@ -125,7 +127,7 @@ export const getAgentResponse = async (
     config: {
         tools: [{ functionDeclarations: [addGateTool, replaceCircuitTool, clearCircuitTool, generateCodeTool, getSimulationResultsTool, loadTemplateTool] }],
     },
-    systemInstruction: SYSTEM_INSTRUCTION
+    systemInstruction: getSystemInstruction(numQubits)
   });
 
   onStatusUpdate({ agent: 'Orchestrator', status: 'completed', message: 'Plan generated.' });
@@ -203,10 +205,9 @@ export const getAgentResponse = async (
   return { displayText, actions };
 };
 
-export const generateQiskitCode = (placedGates: PlacedGate[]): string => {
+export const generateQiskitCode = (placedGates: PlacedGate[], numQubits: number): string => {
     const sortedGates = [...placedGates].sort((a, b) => a.left - b.left);
-    const numQubits = sortedGates.reduce((max, g) => Math.max(max, g.qubit, g.controlQubit ?? -1), 0) + 1;
-
+    
     let code = `from qiskit import QuantumCircuit\n\n`;
     code += `# Create a quantum circuit with ${numQubits} qubits\n`;
     code += `qc = QuantumCircuit(${numQubits})\n\n`;

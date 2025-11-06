@@ -10,9 +10,8 @@ import { getAgentResponse } from './services/geminiService';
 import { simulate } from './services/quantumSimulator';
 import { gateMap } from './data/gates';
 
-const NUM_QUBITS = 3;
-
 const App: React.FC = () => {
+  const [numQubits, setNumQubits] = useState(3);
   const [placedGates, setPlacedGates] = useState<PlacedGate[]>([]);
   const [selectedGateId, setSelectedGateId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -31,9 +30,9 @@ const App: React.FC = () => {
 
   // --- Live Simulation Engine ---
   useEffect(() => {
-    const result = simulate(placedGates, NUM_QUBITS);
+    const result = simulate(placedGates, numQubits);
     setSimulationResult(result);
-  }, [placedGates]);
+  }, [placedGates, numQubits]);
 
   // --- Gate Selection & Deletion ---
   const handleSelectGate = (instanceId: string) => {
@@ -107,7 +106,7 @@ const App: React.FC = () => {
     };
     
     try {
-      const aiResponse = await getAgentResponse(allMessages, placedGates, simulationResult, onStatusUpdate);
+      const aiResponse = await getAgentResponse(allMessages, placedGates, simulationResult, numQubits, onStatusUpdate);
       if (aiResponse.actions.length > 0) {
         executeActions(aiResponse.actions);
       }
@@ -127,7 +126,7 @@ const App: React.FC = () => {
     } finally {
       setIsAiLoading(false);
     }
-  }, [isAiLoading, placedGates, messages, executeActions, simulationResult]);
+  }, [isAiLoading, placedGates, messages, executeActions, simulationResult, numQubits]);
 
   const handleOptimize = useCallback(() => {
     handleSend("Optimize my current circuit");
@@ -159,6 +158,17 @@ const App: React.FC = () => {
     }
   }, [handleSend]);
 
+  const handleNumQubitsChange = (newNumQubits: number) => {
+    if (newNumQubits >= 2 && newNumQubits <= 5) {
+      setNumQubits(newNumQubits);
+      setPlacedGates([]); // Clear circuit to prevent invalid gate placements
+      setSelectedGateId(null);
+      if (visualizedQubit >= newNumQubits) {
+        setVisualizedQubit(0);
+      }
+    }
+  };
+
 
   const handleGateDrop = (gateId: string, point: { x: number; y: number }) => {
     if (!canvasRef.current) return;
@@ -174,7 +184,7 @@ const App: React.FC = () => {
 
       const relativeY = point.y - canvasRect.top - PADDING;
       let qubitIndex = Math.floor(relativeY / QUBIT_LINE_HEIGHT);
-      qubitIndex = Math.max(0, Math.min(NUM_QUBITS - 1, qubitIndex));
+      qubitIndex = Math.max(0, Math.min(numQubits - 1, qubitIndex));
 
       const relativeX = point.x - canvasRect.left - PADDING;
       const canvasContentWidth = canvasRect.width - PADDING * 2;
@@ -190,7 +200,7 @@ const App: React.FC = () => {
 
       if (gateInfo?.type === 'control') {
         let controlIndex;
-        if (qubitIndex < NUM_QUBITS - 1) {
+        if (qubitIndex < numQubits - 1) {
           controlIndex = qubitIndex + 1;
         } else {
           controlIndex = qubitIndex - 1;
@@ -249,7 +259,9 @@ const App: React.FC = () => {
           <LeftPanel onDragInitiate={handleDragInitiate} draggingGateId={draggingGate?.gate.id} onLoadTemplate={handleLoadTemplate}/>
           <div className="flex-grow flex flex-col gap-4">
             <CircuitCanvas 
-              ref={canvasRef} 
+              ref={canvasRef}
+              numQubits={numQubits}
+              onNumQubitsChange={handleNumQubitsChange}
               placedGates={placedGates} 
               isDragging={isDragging} 
               onOptimize={handleOptimize}
@@ -270,6 +282,7 @@ const App: React.FC = () => {
             setActiveTab={setActiveTab}
             placedGates={placedGates}
             visualizedQubit={visualizedQubit}
+            numQubits={numQubits}
           />
         </main>
       </div>
