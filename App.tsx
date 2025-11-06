@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import CircuitCanvas from './components/CircuitCanvas';
@@ -13,10 +13,11 @@ const NUM_QUBITS = 3;
 
 const App: React.FC = () => {
   const [placedGates, setPlacedGates] = useState<PlacedGate[]>([]);
+  const [selectedGateId, setSelectedGateId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [draggingGate, setDraggingGate] = useState<{gate: QuantumGate, point: {x: number, y: number}} | null>(null);
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
-  const [activeTab, setActiveTab] = useState<'copilot' | 'visualization'>('copilot');
+  const [activeTab, setActiveTab] = useState<'copilot' | 'visualization' | 'code'>('copilot');
   
   const [messages, setMessages] = useState<Message[]>([
     { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. How can I help you design a circuit today? Try asking me to 'create a bell state'." },
@@ -26,8 +27,30 @@ const App: React.FC = () => {
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragInfoRef = useRef<{ gate: QuantumGate | null }>({ gate: null });
 
+  // --- Live Simulation Engine ---
+  useEffect(() => {
+    const result = simulate(placedGates, NUM_QUBITS);
+    setSimulationResult(result);
+  }, [placedGates]);
+
+  // --- Gate Selection & Deletion ---
+  const handleSelectGate = (instanceId: string) => {
+    setSelectedGateId(prevId => prevId === instanceId ? null : instanceId);
+  };
+  
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.key === 'Backspace' || event.key === 'Delete') && selectedGateId) {
+        setPlacedGates(prev => prev.filter(g => g.instanceId !== selectedGateId));
+        setSelectedGateId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedGateId]);
+
+
   const executeActions = useCallback((actions: AIAction[]) => {
-    setSimulationResult(null); // Clear previous simulation results on new actions
     actions.forEach(action => {
       switch (action.type) {
         case 'clear_circuit':
@@ -41,21 +64,32 @@ const App: React.FC = () => {
           setPlacedGates(prev => [...prev, newGate]);
           break;
         }
-        case 'replace_circuit':
-          setPlacedGates(action.payload);
+        case 'replace_circuit': {
+          const gatesWithIds = action.payload.map((g, i) => ({
+            ...g,
+            instanceId: `${g.gateId}-${Date.now()}-${i}`,
+          }));
+          setPlacedGates(gatesWithIds);
+          break;
+        }
+        case 'generate_code':
+          setActiveTab('code');
           break;
         default:
-          console.warn('Unknown AI action:', action.type);
+          console.warn('Unknown AI action:', action);
       }
     });
   }, []);
 
   const handleSend = useCallback(async (prompt: string) => {
     if (prompt.trim() === '' || isAiLoading) return;
+    setSelectedGateId(null);
 
     const userMessage: Message = { type: 'text', sender: 'user', text: prompt };
+    const allMessages = [...messages, userMessage];
+    
     const agentStatusMessage: Message = { type: 'agent_status', updates: [] };
-    setMessages(prev => [...prev, userMessage, agentStatusMessage]);
+    setMessages([...allMessages, agentStatusMessage]);
     setIsAiLoading(true);
     setActiveTab('copilot');
 
@@ -71,7 +105,7 @@ const App: React.FC = () => {
     };
     
     try {
-      const aiResponse = await getAgentResponse(prompt, placedGates, onStatusUpdate);
+      const aiResponse = await getAgentResponse(allMessages, placedGates, onStatusUpdate);
       if (aiResponse.actions.length > 0) {
         executeActions(aiResponse.actions);
       }
@@ -91,20 +125,19 @@ const App: React.FC = () => {
     } finally {
       setIsAiLoading(false);
     }
-  }, [isAiLoading, placedGates, executeActions]);
+  }, [isAiLoading, placedGates, messages, executeActions]);
 
   const handleOptimize = useCallback(() => {
     handleSend("Optimize my current circuit");
   }, [handleSend]);
 
-  const handleRunSimulation = useCallback(() => {
-    const result = simulate(placedGates, NUM_QUBITS);
-    setSimulationResult(result);
+  const handleShowVisualization = useCallback(() => {
     setActiveTab('visualization');
-  }, [placedGates]);
+  }, []);
 
   const handleGateDrop = (gateId: string, point: { x: number; y: number }) => {
     if (!canvasRef.current) return;
+    setSelectedGateId(null);
 
     const canvasRect = canvasRef.current.getBoundingClientRect();
     if (
@@ -122,7 +155,6 @@ const App: React.FC = () => {
       const canvasContentWidth = canvasRect.width - PADDING * 2;
       const leftPercent = Math.max(0, Math.min(100, (relativeX / canvasContentWidth) * 100));
 
-      setSimulationResult(null); // Invalidate simulation result on change
       const newGate: PlacedGate = {
         instanceId: `${gateId}-${Date.now()}`,
         gateId: gateId,
@@ -159,21 +191,28 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative">
+    <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => setSelectedGateId(null)}>
       <div className="absolute inset-0 z-0 opacity-20">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(120,81,250,0.2),_transparent_40%)]"></div>
         <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre-v2.png')] opacity-20"></div>
       </div>
       
       <div className="relative z-10 flex flex-col flex-grow">
-        <Header onRunSimulation={handleRunSimulation} />
+        <Header onShowVisualization={handleShowVisualization} />
          <div className="px-4 pt-2">
             <span className="text-xs font-mono bg-gray-700/50 text-gray-400 px-2 py-0.5 rounded">Preview</span>
         </div>
         <main className="flex flex-grow p-4 gap-4">
           <LeftPanel onDragInitiate={handleDragInitiate} draggingGateId={draggingGate?.gate.id} />
           <div className="flex-grow flex flex-col gap-4">
-            <CircuitCanvas ref={canvasRef} placedGates={placedGates} isDragging={isDragging} onOptimize={handleOptimize} />
+            <CircuitCanvas 
+              ref={canvasRef} 
+              placedGates={placedGates} 
+              isDragging={isDragging} 
+              onOptimize={handleOptimize}
+              selectedGateId={selectedGateId}
+              onSelectGate={handleSelectGate}
+            />
           </div>
           <RightPanel 
             messages={messages}
@@ -182,6 +221,7 @@ const App: React.FC = () => {
             simulationResult={simulationResult}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
+            placedGates={placedGates}
           />
         </main>
       </div>

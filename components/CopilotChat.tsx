@@ -43,9 +43,9 @@ const CopilotChat: React.FC<CopilotChatProps> = ({ messages, isLoading, onSend }
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
       transition={{ duration: 0.3 }}
-      className="flex flex-col h-full"
+      className="absolute inset-0 flex flex-col"
     >
-      <div className="flex-grow overflow-y-auto p-2 space-y-4">
+      <div className="flex-grow min-h-0 overflow-y-auto p-2 space-y-4">
         <AnimatePresence>
           {messages.map((msg, index) => (
             <motion.div
@@ -95,7 +95,7 @@ const CopilotChat: React.FC<CopilotChatProps> = ({ messages, isLoading, onSend }
         )}
         <div ref={messagesEndRef} />
       </div>
-      <div className="mt-4 flex items-center gap-2 border-t border-gray-500/20 pt-4">
+      <div className="flex-shrink-0 mt-4 flex items-center gap-2 border-t border-gray-500/20 pt-4">
         <input
           type="text"
           value={input}

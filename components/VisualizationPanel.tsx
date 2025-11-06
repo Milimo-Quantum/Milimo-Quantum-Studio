@@ -17,7 +17,7 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result }) => {
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
       transition={{ duration: 0.3 }}
-      className="flex flex-col h-full gap-6 text-sm text-gray-300 font-['IBM_Plex_Mono']"
+      className="absolute inset-0 overflow-y-auto flex flex-col gap-6 text-sm text-gray-300 font-['IBM_Plex_Mono']"
     >
       {!hasResult ? (
         <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">

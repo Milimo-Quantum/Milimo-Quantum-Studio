@@ -2,9 +2,10 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import CopilotChat from './CopilotChat';
 import VisualizationPanel from './VisualizationPanel';
-import type { Message, SimulationResult } from '../types';
+import CodePanel from './CodePanel';
+import type { Message, SimulationResult, PlacedGate } from '../types';
 
-type Tab = 'copilot' | 'visualization';
+type Tab = 'copilot' | 'visualization' | 'code';
 
 interface RightPanelProps {
   messages: Message[];
@@ -13,14 +14,16 @@ interface RightPanelProps {
   simulationResult: SimulationResult | null;
   activeTab: Tab;
   setActiveTab: (tab: Tab) => void;
+  placedGates: PlacedGate[];
 }
 
 const RightPanel: React.FC<RightPanelProps> = (props) => {
-  const { activeTab, setActiveTab, simulationResult } = props;
+  const { activeTab, setActiveTab, simulationResult, placedGates } = props;
 
   const tabs: { id: Tab, label: string }[] = [
     { id: 'copilot', label: 'Milimo AI' },
     { id: 'visualization', label: 'Visualization' },
+    { id: 'code', label: 'Code' },
   ];
 
   return (
@@ -50,10 +53,11 @@ const RightPanel: React.FC<RightPanelProps> = (props) => {
           </button>
         ))}
       </div>
-      <div className="flex-grow overflow-hidden">
+      <div className="relative flex-1 min-h-0">
         <AnimatePresence mode="wait">
           {activeTab === 'copilot' && <CopilotChat {...props} />}
           {activeTab === 'visualization' && <VisualizationPanel result={simulationResult} />}
+          {activeTab === 'code' && <CodePanel placedGates={placedGates} />}
         </AnimatePresence>
       </div>
     </motion.aside>

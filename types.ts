@@ -16,6 +16,7 @@ export interface PlacedGate {
   qubit: number; // Target qubit
   controlQubit?: number; // Control qubit for multi-qubit gates
   left: number; // Percentage position from left
+  isSelected?: boolean;
 }
 
 // Agent-related Types
@@ -29,10 +30,15 @@ export interface AgentStatusUpdate {
 }
 
 // AI Communication Protocol
-export interface AIAction {
-  type: 'clear_circuit' | 'add_gate' | 'replace_circuit';
-  payload: any;
-}
+export type AddGatePayload = Omit<PlacedGate, 'instanceId' | 'isSelected'>;
+export type ReplaceCircuitPayload = AddGatePayload[];
+
+export type AIAction = 
+  | { type: 'clear_circuit'; payload: null }
+  | { type: 'add_gate'; payload: AddGatePayload }
+  | { type: 'replace_circuit'; payload: ReplaceCircuitPayload }
+  | { type: 'generate_code'; payload: null };
+
 
 export interface AIResponse {
   displayText: string;
