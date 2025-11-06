@@ -60,6 +60,10 @@ export interface AgentStatusMessage {
 export type Message = TextMessage | AgentStatusMessage;
 
 // Simulation Types
+export interface ComplexNumber {
+  re: number;
+  im: number;
+}
 export interface Probability {
   state: string;
   value: number;
@@ -67,4 +71,5 @@ export interface Probability {
 
 export interface SimulationResult {
   probabilities: Probability[];
+  stateVector: ComplexNumber[];
 }

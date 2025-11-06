@@ -14,6 +14,8 @@ interface CircuitCanvasProps {
   onClear: () => void;
   selectedGateId: string | null;
   onSelectGate: (instanceId: string) => void;
+  visualizedQubit: number;
+  setVisualizedQubit: (qubitIndex: number) => void;
 }
 
 const NUM_QUBITS = 3;
@@ -21,7 +23,7 @@ const QUBIT_LINE_HEIGHT = 64; // h-16
 const GATE_WIDTH = 40; // w-10
 const GATE_HEIGHT = 40; // h-10
 
-const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGates, isDragging, onOptimize, onClear, selectedGateId, onSelectGate }, ref) => {
+const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGates, isDragging, onOptimize, onClear, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit }, ref) => {
   
   const handleGateClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
@@ -42,13 +44,30 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
     >
       <div className="absolute inset-0 bg-gradient-to-br from-transparent to-black/30"></div>
       
-      <div className="relative w-full h-full flex flex-col justify-start">
+      <div className="relative w-full h-full flex flex-col justify-start z-0">
         {/* Qubit Lines */}
         {[...Array(NUM_QUBITS)].map((_, i) => (
-           <div key={`qubit-${i}`} className="relative flex items-center" style={{ height: `${QUBIT_LINE_HEIGHT}px` }}>
-            <span className="absolute -left-10 text-gray-500 font-mono text-sm select-none">{i}]</span>
-            <div className="w-full h-px bg-cyan-400/50"></div>
-          </div>
+           <div
+            key={`qubit-${i}`}
+            className="relative flex items-center group cursor-pointer"
+            style={{ height: `${QUBIT_LINE_HEIGHT}px` }}
+            onClick={() => setVisualizedQubit(i)}
+            >
+            <span className={`absolute -left-12 font-mono text-sm select-none transition-colors ${visualizedQubit === i ? 'text-cyan-400' : 'text-gray-500'}`}>
+                q[{i}]
+            </span>
+            <div className={`w-full h-px transition-all duration-300 ${visualizedQubit === i ? 'bg-cyan-400 scale-y-150' : 'bg-cyan-400/50 group-hover:bg-cyan-400/80'}`}></div>
+            {visualizedQubit === i && (
+                <motion.div
+                layoutId="qubit-selection"
+                className="absolute -inset-x-2 -inset-y-4 bg-cyan-500/10 rounded-lg"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{duration: 0.2}}
+                />
+            )}
+            </div>
         ))}
 
         {/* Placed Gates */}
@@ -61,8 +80,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
           const top = (placedGate.qubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
           const isSelected = placedGate.instanceId === selectedGateId;
 
-          if (gateInfo.type === 'control') {
-            if (placedGate.controlQubit === undefined) return null;
+          if (gateInfo.type === 'control' && placedGate.controlQubit !== undefined) {
             const controlY = (placedGate.controlQubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
             
             const containerTop = Math.min(top, controlY) - (GATE_HEIGHT / 2);
@@ -70,16 +88,9 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
             
             const isControlTop = controlY < top;
 
-            const targetIcon = (() => {
-                switch (placedGate.gateId) {
-                    case 'cnot':
-                        return <CNOTGateIcon className="w-8 h-8 text-blue-400"/>;
-                    case 'cz':
-                        return <div className="w-3 h-3 bg-blue-400 rounded-full" />;
-                    default:
-                        return null;
-                }
-            })();
+            // Target is on 'qubit', control is on 'controlQubit'
+            const targetTop = isControlTop ? (containerHeight - GATE_HEIGHT) : 0;
+            const controlTop = isControlTop ? 0 : (containerHeight - GATE_HEIGHT);
 
             if (placedGate.gateId === 'swap') {
                 return (
@@ -108,19 +119,16 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
                                     width: '2px',
                                 }}
                             />
-                             <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: isControlTop ? `${(GATE_HEIGHT / 2) - 12}px` : `${containerHeight - (GATE_HEIGHT / 2) - 12}px`, width: '24px', height: '24px'}}>
+                             <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: targetTop + GATE_HEIGHT/2 - 12, width: '24px', height: '24px'}}>
                                 <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
                             </div>
-                            <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: isControlTop ? `${containerHeight - (GATE_HEIGHT / 2) - 12}px` : `${(GATE_HEIGHT / 2) - 12}px`, width: '24px', height: '24px'}}>
+                            <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: controlTop + GATE_HEIGHT/2 - 12, width: '24px', height: '24px'}}>
                                 <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
                             </div>
                             {isSelected && (
                                 <motion.div
                                     className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
                                     layoutId="selectionRing"
-                                    initial={{ opacity: 0, scale: 1.2 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.8}}
                                 />
                             )}
                         </div>
@@ -145,9 +153,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
                   }}
                   onClick={(e) => handleGateClick(e, placedGate.instanceId)}
                 >
-                  {/* Container for relative positioning */}
                   <div className="relative w-full h-full hover:bg-cyan-500/10 rounded-lg transition-colors">
-                    {/* Line */}
                     <div
                       className="absolute bg-blue-400"
                       style={{
@@ -157,34 +163,28 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
                         width: '2px',
                       }}
                     />
-                    {/* Control Dot */}
                     <div
                       className="absolute w-3 h-3 bg-blue-400 rounded-full"
                       style={{
                         left: `calc(50% - 6px)`,
-                        top: isControlTop ? `${(GATE_HEIGHT / 2) - 6}px` : `${containerHeight - (GATE_HEIGHT / 2) - 6}px`,
+                        top: controlTop + GATE_HEIGHT/2 - 6
                       }}
                     />
-                    {/* Target Icon */}
                     <div
                       className="absolute flex items-center justify-center"
                       style={{
                         width: `${GATE_WIDTH}px`,
                         height: `${GATE_HEIGHT}px`,
-                        left: `calc(50% - ${GATE_WIDTH/2}px)`,
-                        top: isControlTop ? `${containerHeight - GATE_HEIGHT}px` : `0px`,
+                        left: 0,
+                        top: targetTop,
                       }}
                     >
-                      {targetIcon}
+                      {placedGate.gateId === 'cnot' ? <CNOTGateIcon className="w-8 h-8 text-blue-400"/> : <div className="w-3 h-3 bg-blue-400 rounded-full" />}
                     </div>
-                     {/* Selection Highlight */}
                     {isSelected && (
                       <motion.div
                           className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
                           layoutId="selectionRing"
-                          initial={{ opacity: 0, scale: 1.2 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.8}}
                         />
                     )}
                   </div>
@@ -212,9 +212,6 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
                    <motion.div
                       className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
                       layoutId="selectionRing"
-                      initial={{ opacity: 0, scale: 1.2 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.8}}
                     />
                 )}
               </div>

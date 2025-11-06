@@ -1,4 +1,4 @@
-import type { PlacedGate, SimulationResult } from '../types';
+import type { PlacedGate, SimulationResult, ComplexNumber } from '../types';
 
 // --- Complex Number Math ---
 class Complex {
@@ -59,14 +59,13 @@ const GATES: { [key: string]: Complex[][] } = {
  * Simulates a quantum circuit and returns the measurement probabilities.
  * @param placedGates The array of gates placed on the canvas.
  * @param numQubits The total number of qubits in the circuit.
- * @returns A SimulationResult object with probabilities.
+ * @returns A SimulationResult object with probabilities and the final state vector.
  */
 export const simulate = (placedGates: PlacedGate[], numQubits: number): SimulationResult => {
   const numStates = 1 << numQubits;
   let stateVector: Complex[] = Array(numStates).fill(new Complex(0));
   stateVector[0] = new Complex(1); // Initialize to |00...0>
 
-  // Sort gates by their horizontal position to apply them in order
   const sortedGates = [...placedGates].sort((a, b) => a.left - b.left);
 
   for (const gate of sortedGates) {
@@ -98,26 +97,26 @@ export const simulate = (placedGates: PlacedGate[], numQubits: number): Simulati
           newStateVector = applySWAP(stateVector, gate.qubit, gate.controlQubit, numQubits);
         }
         break;
-      // 'measure' gate doesn't change the state vector in this simulation model
       case 'measure':
         break;
     }
     stateVector = newStateVector;
   }
 
-  // Calculate probabilities from the final state vector
   const probabilities = stateVector.map((amplitude, i) => {
     const binaryState = i.toString(2).padStart(numQubits, '0');
     return {
       state: `|${binaryState}⟩`,
       value: amplitude.magnitudeSq(),
     };
-  }).filter(p => p.value > 1e-9); // Filter out negligible probabilities
+  }).filter(p => p.value > 1e-9);
 
-  return { probabilities };
+  return {
+    probabilities,
+    stateVector: stateVector.map(c => ({ re: c.re, im: c.im }))
+  };
 };
 
-// --- Gate Application Logic ---
 const applySingleQubitGate = (
   currentState: Complex[],
   qubit: number,
@@ -127,13 +126,16 @@ const applySingleQubitGate = (
   const newState = Array(1 << numQubits).fill(new Complex(0));
   for (let i = 0; i < (1 << numQubits); i++) {
     const bit = (i >> (numQubits - 1 - qubit)) & 1;
-    const targetState = i ^ (bit << (numQubits - 1 - qubit));
-    
-    const offDiagonalBit = targetState | ((1-bit) << (numQubits - 1 - qubit));
-    
-    newState[i] = currentState[targetState].multiply(matrix[bit][0]).add(
-                  currentState[offDiagonalBit].multiply(matrix[bit][1])
-    );
+    const basisStateWithoutQubit = i & ~(1 << (numQubits - 1 - qubit));
+
+    const i0 = basisStateWithoutQubit | (0 << (numQubits - 1 - qubit));
+    const i1 = basisStateWithoutQubit | (1 << (numQubits - 1 - qubit));
+
+    if (bit === 0) { // Applying to |...0...>
+        newState[i] = currentState[i0].multiply(matrix[0][0]).add(currentState[i1].multiply(matrix[0][1]));
+    } else { // Applying to |...1...>
+        newState[i] = currentState[i0].multiply(matrix[1][0]).add(currentState[i1].multiply(matrix[1][1]));
+    }
   }
   return newState;
 };
@@ -149,10 +151,8 @@ const applyCNOT = (
   const targetMask = 1 << (numQubits - 1 - targetQubit);
 
   for (let i = 0; i < (1 << numQubits); i++) {
-    // If control bit is 1
     if ((i & controlMask) !== 0) {
       const flippedState = i ^ targetMask;
-      // Process each pair only once to avoid swapping back
       if (i < flippedState) {
         [newState[i], newState[flippedState]] = [currentState[flippedState], currentState[i]];
       }
@@ -160,6 +160,7 @@ const applyCNOT = (
   }
   return newState;
 };
+
 
 const applyCZ = (
   currentState: Complex[],
@@ -171,8 +172,7 @@ const applyCZ = (
   const controlMask = 1 << (numQubits - 1 - controlQubit);
   const targetMask = 1 << (numQubits - 1 - targetQubit);
   for (let i = 0; i < (1 << numQubits); i++) {
-    // Apply phase flip if both control and target bits are 1
-    if ((i & controlMask) && (i & targetMask)) {
+    if ((i & controlMask) !== 0 && (i & targetMask) !== 0) {
       newState[i] = newState[i].multiply(new Complex(-1));
     }
   }
@@ -186,19 +186,56 @@ const applySWAP = (
   numQubits: number
 ): Complex[] => {
   const newState = [...currentState];
-  const mask1 = 1 << (numQubits - 1 - qubit1);
-  const mask2 = 1 << (numQubits - 1 - qubit2);
   for (let i = 0; i < (1 << numQubits); i++) {
-    const bit1 = (i & mask1) !== 0;
-    const bit2 = (i & mask2) !== 0;
-    // If bits are different, find the swapped state and swap amplitudes
+    const bit1 = (i >> (numQubits - 1 - qubit1)) & 1;
+    const bit2 = (i >> (numQubits - 1 - qubit2)) & 1;
     if (bit1 !== bit2) {
-      const j = i ^ mask1 ^ mask2; // The state with the bits swapped
-      // Process each pair only once to avoid swapping back
+      const j = i ^ (1 << (numQubits - 1 - qubit1)) ^ (1 << (numQubits - 1 - qubit2));
       if (i < j) {
         [newState[i], newState[j]] = [currentState[j], currentState[i]];
       }
     }
   }
   return newState;
+};
+
+
+/**
+ * Calculates the expectation value of an operator for a given state. ⟨Ψ|O|Ψ⟩
+ */
+const calculateExpectationValue = (
+  stateVector: Complex[],
+  operatorMatrix: Complex[][],
+  qubit: number,
+  numQubits: number
+): number => {
+  const operatedState = applySingleQubitGate(stateVector, qubit, operatorMatrix, numQubits);
+  let expectation = new Complex(0, 0);
+  for (let i = 0; i < stateVector.length; i++) {
+    const psi_i_star = new Complex(stateVector[i].re, -stateVector[i].im); // Conjugate
+    expectation = expectation.add(psi_i_star.multiply(operatedState[i]));
+  }
+  // For Hermitian operators, the expectation value is real.
+  return expectation.re;
+};
+
+
+/**
+ * Calculates the Bloch sphere coordinates (x, y, z) for a single qubit.
+ * These are the expectation values of the Pauli operators.
+ */
+export const getQubitBlochSphereCoordinates = (
+  stateVectorComplex: ComplexNumber[],
+  qubit: number,
+  numQubits: number
+): { x: number; y: number; z: number } => {
+  if (stateVectorComplex.length === 0) return { x: 0, y: 0, z: 1 };
+  
+  const stateVector = stateVectorComplex.map(c => new Complex(c.re, c.im));
+  
+  const x = calculateExpectationValue(stateVector, GATES.x, qubit, numQubits);
+  const y = calculateExpectationValue(stateVector, GATES.y, qubit, numQubits);
+  const z = calculateExpectationValue(stateVector, GATES.z, qubit, numQubits);
+
+  return { x, y, z };
 };

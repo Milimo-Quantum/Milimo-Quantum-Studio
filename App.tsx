@@ -19,6 +19,7 @@ const App: React.FC = () => {
   const [draggingGate, setDraggingGate] = useState<{gate: QuantumGate, point: {x: number, y: number}} | null>(null);
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [activeTab, setActiveTab] = useState<'copilot' | 'visualization' | 'code'>('copilot');
+  const [visualizedQubit, setVisualizedQubit] = useState<number>(0);
   
   const [messages, setMessages] = useState<Message[]>([
     { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. How can I help you design a circuit today? Try asking me to 'create a bell state'." },
@@ -169,12 +170,19 @@ const App: React.FC = () => {
         left: leftPercent,
       };
 
-      // Intelligent Default Placement for CNOT
       if (gateInfo?.type === 'control') {
+        let controlIndex;
         if (qubitIndex < NUM_QUBITS - 1) {
-          newGate.controlQubit = qubitIndex + 1; // Default to line below
+          controlIndex = qubitIndex + 1;
         } else {
-          newGate.controlQubit = qubitIndex - 1; // Default to line above if on last qubit
+          controlIndex = qubitIndex - 1;
+        }
+        
+        if(gateInfo.id === 'swap') {
+            newGate.controlQubit = controlIndex;
+        } else {
+            newGate.qubit = controlIndex; // Target is the other line
+            newGate.controlQubit = qubitIndex; // Control is the dropped line
         }
       }
 
@@ -230,6 +238,8 @@ const App: React.FC = () => {
               onClear={handleClearCircuit}
               selectedGateId={selectedGateId}
               onSelectGate={handleSelectGate}
+              visualizedQubit={visualizedQubit}
+              setVisualizedQubit={setVisualizedQubit}
             />
           </div>
           <RightPanel 
@@ -240,6 +250,7 @@ const App: React.FC = () => {
             activeTab={activeTab}
             setActiveTab={setActiveTab}
             placedGates={placedGates}
+            visualizedQubit={visualizedQubit}
           />
         </main>
       </div>
