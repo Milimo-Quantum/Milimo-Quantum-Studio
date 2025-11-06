@@ -1,0 +1,5 @@
+{
+  "name": "Milimo Quantum Studio",
+  "description": "An intelligent, visually stunning, and beginner-friendly web-based Quantum Integrated Development Environment (IDE). It helps users design, simulate, and learn quantum circuits and algorithms through AI agents and interactive visualizations, powered by React and Google's Gemini API.",
+  "requestFramePermissions": []
+}

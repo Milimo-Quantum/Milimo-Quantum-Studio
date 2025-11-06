@@ -1,0 +1,207 @@
+import React, { useRef, useState, useCallback } from 'react';
+import Header from './components/Header';
+import LeftPanel from './components/LeftPanel';
+import CircuitCanvas from './components/CircuitCanvas';
+import RightPanel from './components/RightPanel';
+import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult } from './types';
+import { AnimatePresence, motion } from 'framer-motion';
+import QuantumGateComponent from './components/QuantumGate';
+import { getAgentResponse } from './services/geminiService';
+import { simulate } from './services/quantumSimulator';
+
+const NUM_QUBITS = 3;
+
+const App: React.FC = () => {
+  const [placedGates, setPlacedGates] = useState<PlacedGate[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [draggingGate, setDraggingGate] = useState<{gate: QuantumGate, point: {x: number, y: number}} | null>(null);
+  const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
+  const [activeTab, setActiveTab] = useState<'copilot' | 'visualization'>('copilot');
+  
+  const [messages, setMessages] = useState<Message[]>([
+    { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. How can I help you design a circuit today? Try asking me to 'create a bell state'." },
+  ]);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const dragInfoRef = useRef<{ gate: QuantumGate | null }>({ gate: null });
+
+  const executeActions = useCallback((actions: AIAction[]) => {
+    setSimulationResult(null); // Clear previous simulation results on new actions
+    actions.forEach(action => {
+      switch (action.type) {
+        case 'clear_circuit':
+          setPlacedGates([]);
+          break;
+        case 'add_gate': {
+          const newGate: PlacedGate = {
+            ...action.payload,
+            instanceId: `${action.payload.gateId}-${Date.now()}`,
+          };
+          setPlacedGates(prev => [...prev, newGate]);
+          break;
+        }
+        case 'replace_circuit':
+          setPlacedGates(action.payload);
+          break;
+        default:
+          console.warn('Unknown AI action:', action.type);
+      }
+    });
+  }, []);
+
+  const handleSend = useCallback(async (prompt: string) => {
+    if (prompt.trim() === '' || isAiLoading) return;
+
+    const userMessage: Message = { type: 'text', sender: 'user', text: prompt };
+    const agentStatusMessage: Message = { type: 'agent_status', updates: [] };
+    setMessages(prev => [...prev, userMessage, agentStatusMessage]);
+    setIsAiLoading(true);
+    setActiveTab('copilot');
+
+    const onStatusUpdate = (update: AgentStatusUpdate) => {
+      setMessages(prev => {
+        const newMessages = [...prev];
+        const lastMessage = newMessages[newMessages.length - 1];
+        if (lastMessage?.type === 'agent_status') {
+          lastMessage.updates.push(update);
+        }
+        return newMessages;
+      });
+    };
+    
+    try {
+      const aiResponse = await getAgentResponse(prompt, placedGates, onStatusUpdate);
+      if (aiResponse.actions.length > 0) {
+        executeActions(aiResponse.actions);
+      }
+      const aiMessage: Message = { type: 'text', sender: 'ai', text: aiResponse.displayText };
+      setMessages(prev => {
+        const finalMessages = prev.slice(0, -1); // Remove the status message
+        return [...finalMessages, aiMessage];
+      });
+
+    } catch (error) {
+      console.error("Error from AI Service:", error);
+      const errorMessage: Message = { type: 'text', sender: 'ai', text: "Sorry, I encountered an error. Please try again." };
+      setMessages(prev => {
+        const finalMessages = prev.slice(0, -1);
+        return [...finalMessages, errorMessage];
+      });
+    } finally {
+      setIsAiLoading(false);
+    }
+  }, [isAiLoading, placedGates, executeActions]);
+
+  const handleOptimize = useCallback(() => {
+    handleSend("Optimize my current circuit");
+  }, [handleSend]);
+
+  const handleRunSimulation = useCallback(() => {
+    const result = simulate(placedGates, NUM_QUBITS);
+    setSimulationResult(result);
+    setActiveTab('visualization');
+  }, [placedGates]);
+
+  const handleGateDrop = (gateId: string, point: { x: number; y: number }) => {
+    if (!canvasRef.current) return;
+
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    if (
+      point.x >= canvasRect.left && point.x <= canvasRect.right &&
+      point.y >= canvasRect.top && point.y <= canvasRect.bottom
+    ) {
+      const PADDING = 32;
+      const QUBIT_LINE_HEIGHT = 64;
+
+      const relativeY = point.y - canvasRect.top - PADDING;
+      let qubitIndex = Math.floor(relativeY / QUBIT_LINE_HEIGHT);
+      qubitIndex = Math.max(0, Math.min(NUM_QUBITS - 1, qubitIndex));
+
+      const relativeX = point.x - canvasRect.left - PADDING;
+      const canvasContentWidth = canvasRect.width - PADDING * 2;
+      const leftPercent = Math.max(0, Math.min(100, (relativeX / canvasContentWidth) * 100));
+
+      setSimulationResult(null); // Invalidate simulation result on change
+      const newGate: PlacedGate = {
+        instanceId: `${gateId}-${Date.now()}`,
+        gateId: gateId,
+        qubit: qubitIndex,
+        left: leftPercent,
+      };
+      setPlacedGates(prev => [...prev, newGate]);
+    }
+  };
+  
+  const handlePointerMove = useCallback((event: PointerEvent) => {
+    setDraggingGate(g => g ? { ...g, point: { x: event.clientX, y: event.clientY } } : null);
+  }, []);
+
+  const handlePointerUp = useCallback((event: PointerEvent) => {
+    window.removeEventListener('pointermove', handlePointerMove);
+    window.removeEventListener('pointerup', handlePointerUp);
+    if (dragInfoRef.current.gate) {
+      handleGateDrop(dragInfoRef.current.gate.id, { x: event.clientX, y: event.clientY });
+    }
+    setIsDragging(false);
+    setDraggingGate(null);
+    dragInfoRef.current.gate = null;
+  }, [handlePointerMove, handleGateDrop]);
+
+  const handleDragInitiate = (gate: QuantumGate, event: React.PointerEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(true);
+    setDraggingGate({ gate, point: { x: event.clientX, y: event.clientY } });
+    dragInfoRef.current.gate = gate;
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
+
+  return (
+    <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative">
+      <div className="absolute inset-0 z-0 opacity-20">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(120,81,250,0.2),_transparent_40%)]"></div>
+        <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre-v2.png')] opacity-20"></div>
+      </div>
+      
+      <div className="relative z-10 flex flex-col flex-grow">
+        <Header onRunSimulation={handleRunSimulation} />
+         <div className="px-4 pt-2">
+            <span className="text-xs font-mono bg-gray-700/50 text-gray-400 px-2 py-0.5 rounded">Preview</span>
+        </div>
+        <main className="flex flex-grow p-4 gap-4">
+          <LeftPanel onDragInitiate={handleDragInitiate} draggingGateId={draggingGate?.gate.id} />
+          <div className="flex-grow flex flex-col gap-4">
+            <CircuitCanvas ref={canvasRef} placedGates={placedGates} isDragging={isDragging} onOptimize={handleOptimize} />
+          </div>
+          <RightPanel 
+            messages={messages}
+            isLoading={isAiLoading}
+            onSend={handleSend}
+            simulationResult={simulationResult}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+          />
+        </main>
+      </div>
+
+      <AnimatePresence>
+        {draggingGate && (
+          <motion.div
+            className="absolute top-0 left-0"
+            style={{ translateX: draggingGate.point.x, translateY: draggingGate.point.y, x: '-50%', y: '-50%', zIndex: 9999, pointerEvents: 'none' }}
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1.1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.1 }}
+          >
+            <QuantumGateComponent gate={draggingGate.gate} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+export default App;

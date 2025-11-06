@@ -1,0 +1,143 @@
+import React, { forwardRef } from 'react';
+import { motion } from 'framer-motion';
+import type { PlacedGate } from '../types';
+import { gateMap } from '../data/gates';
+import CNOTGateIcon from './icons/CNOTGateIcon';
+import OptimizationAgentIcon from './icons/OptimizationAgentIcon';
+
+interface CircuitCanvasProps {
+  placedGates: PlacedGate[];
+  isDragging: boolean;
+  onOptimize: () => void;
+}
+
+const NUM_QUBITS = 3;
+const QUBIT_LINE_HEIGHT = 64; // h-16
+const GATE_WIDTH = 40; // w-10
+
+const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGates, isDragging, onOptimize }, ref) => {
+  return (
+    <motion.div
+      ref={ref}
+      initial={{ scale: 0.95, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      transition={{ duration: 0.5, delay: 0.3, ease: 'easeOut' }}
+      className={`flex-grow bg-black/30 backdrop-blur-sm rounded-xl border border-gray-500/20 p-8 relative overflow-auto transition-all duration-300 ${isDragging ? 'border-cyan-400/50 ring-2 ring-cyan-400/50' : ''}`}
+      style={{
+        backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(100, 100, 100, 0.3) 1px, transparent 0)',
+        backgroundSize: '20px 20px',
+      }}
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-transparent to-black/30"></div>
+      
+      <div className="relative w-full h-full flex flex-col justify-start">
+        {/* Qubit Lines */}
+        {[...Array(NUM_QUBITS)].map((_, i) => (
+           <div key={`qubit-${i}`} className="relative flex items-center" style={{ height: `${QUBIT_LINE_HEIGHT}px` }}>
+            <span className="absolute -left-10 text-gray-500 font-mono text-sm select-none">{i}]</span>
+            <div className="w-full h-px bg-cyan-400/50"></div>
+          </div>
+        ))}
+
+        {/* Render CNOT lines first */}
+        {placedGates.map(placedGate => {
+          const gateInfo = gateMap.get(placedGate.gateId);
+          if (gateInfo?.type !== 'control' || placedGate.controlQubit === undefined) return null;
+
+          const targetY = (placedGate.qubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
+          const controlY = (placedGate.controlQubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
+
+          const top = Math.min(targetY, controlY);
+          const height = Math.abs(targetY - controlY);
+
+          return (
+             <motion.div
+                key={`${placedGate.instanceId}-line`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="absolute bg-blue-400"
+                style={{
+                  left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px + ${GATE_WIDTH / 2}px)`,
+                  top: `${top}px`,
+                  height: `${height}px`,
+                  width: '2px',
+                  transform: 'translateX(-1px)'
+                }}
+             />
+          );
+        })}
+
+
+        {/* Placed Gates */}
+        {placedGates.map(placedGate => {
+          const gateInfo = gateMap.get(placedGate.gateId);
+          if (!gateInfo) return null;
+
+          const Icon = gateInfo.icon;
+          const top = (placedGate.qubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
+
+          if (gateInfo.type === 'control') {
+            const controlY = (placedGate.controlQubit! * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
+            return (
+              <React.Fragment key={placedGate.instanceId}>
+                {/* Control Dot */}
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="absolute w-3 h-3 bg-blue-400 rounded-full"
+                  style={{
+                    left: `calc(${placedGate.left}% - 6px)`,
+                    top: `${controlY - 6}px`,
+                  }}
+                />
+                {/* Target Icon */}
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="absolute flex items-center justify-center w-8 h-8 z-10"
+                  style={{
+                    left: `calc(${placedGate.left}% - 16px)`,
+                    top: `${top - 16}px`,
+                  }}
+                >
+                  <CNOTGateIcon className="w-8 h-8 text-blue-400"/>
+                </motion.div>
+              </React.Fragment>
+            )
+          }
+
+          return (
+            <motion.div
+              key={placedGate.instanceId}
+              initial={{ opacity: 0, scale: 0.5 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className={`absolute flex items-center justify-center w-10 h-10 bg-gray-900/80 backdrop-blur-sm border rounded-lg ${gateInfo.color} border-current`}
+              style={{
+                left: `calc(${placedGate.left}% - 20px)`,
+                top: `${top - 20}px`,
+              }}
+            >
+              <Icon className="w-6 h-6" />
+            </motion.div>
+          )
+        })}
+      </div>
+      
+      <div className="absolute top-2 right-4">
+        <button 
+          onClick={onOptimize}
+          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-cyan-500/20 hover:text-cyan-300 transition-all"
+        >
+          <OptimizationAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
+          Optimize Circuit
+        </button>
+      </div>
+
+       <div className="absolute bottom-4 right-4 text-xs text-gray-600 font-['IBM_Plex_Mono']">
+        Drag gates from the left panel to build your circuit.
+      </div>
+    </motion.div>
+  );
+});
+
+export default CircuitCanvas;
