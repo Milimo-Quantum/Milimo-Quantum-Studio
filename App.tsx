@@ -52,38 +52,66 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedGateId]);
 
+  const handleNumQubitsChange = useCallback((newNumQubits: number) => {
+    if (newNumQubits >= 2 && newNumQubits <= 5) {
+      setNumQubits(newNumQubits);
+      setPlacedGates([]); // Clear circuit to prevent invalid gate placements
+      setSelectedGateId(null);
+      if (visualizedQubit >= newNumQubits) {
+        setVisualizedQubit(0);
+      }
+    }
+  }, [visualizedQubit]);
+
 
   const executeActions = useCallback((actions: AIAction[]) => {
-    const isValidGate = (gate: Omit<PlacedGate, 'instanceId' | 'isSelected'>) => {
-      const targetQubitValid = gate.qubit >= 0 && gate.qubit < numQubits;
-      const controlQubitValid = gate.controlQubit === undefined || (gate.controlQubit >= 0 && gate.controlQubit < numQubits);
+    let finalNumQubits = numQubits;
+    // Start with a shallow copy of the current gates.
+    let pendingGates: PlacedGate[] = [...placedGates];
+
+    const isValidGate = (gate: Omit<PlacedGate, 'instanceId' | 'isSelected'>, currentQubits: number) => {
+      const targetQubitValid = gate.qubit >= 0 && gate.qubit < currentQubits;
+      const controlQubitValid = gate.controlQubit === undefined || (gate.controlQubit >= 0 && gate.controlQubit < currentQubits);
       return targetQubitValid && controlQubitValid;
     };
     
+    // First, determine the final number of qubits for validation purposes, as this might change within the batch.
+    const setQubitAction = actions.find(a => a.type === 'set_qubit_count');
+    if (setQubitAction && setQubitAction.type === 'set_qubit_count') {
+        const newCount = setQubitAction.payload.count;
+        if (newCount >= 2 && newCount <= 5) {
+            finalNumQubits = newCount;
+        }
+    }
+
+    // Process actions sequentially to build the final state of the gates.
     actions.forEach(action => {
       switch (action.type) {
+        case 'set_qubit_count':
+          // The primary effect here is clearing the board for subsequent actions in this batch.
+          pendingGates = [];
+          break;
         case 'clear_circuit':
-          setPlacedGates([]);
+          pendingGates = [];
           break;
         case 'add_gate': {
-          if (isValidGate(action.payload)) {
+          if (isValidGate(action.payload, finalNumQubits)) {
             const newGate: PlacedGate = {
               ...action.payload,
               instanceId: `${action.payload.gateId}-${Date.now()}`,
             };
-            setPlacedGates(prev => [...prev, newGate]);
+            pendingGates.push(newGate);
           } else {
-            console.warn('AI tried to place an invalid gate:', action.payload);
+            console.warn(`AI tried to place an invalid gate for ${finalNumQubits} qubits:`, action.payload);
           }
           break;
         }
         case 'replace_circuit': {
-          const validGates = action.payload.filter(isValidGate);
-          const gatesWithIds = validGates.map((g, i) => ({
+          const validGates = action.payload.filter(g => isValidGate(g, finalNumQubits));
+          pendingGates = validGates.map((g, i) => ({
             ...g,
             instanceId: `${g.gateId}-${Date.now()}-${i}`,
           }));
-          setPlacedGates(gatesWithIds);
           break;
         }
         case 'generate_code':
@@ -93,7 +121,20 @@ const App: React.FC = () => {
           console.warn('Unknown AI action:', action);
       }
     });
-  }, [numQubits]);
+
+    // Atomically apply the final calculated state to React.
+    if (finalNumQubits !== numQubits) {
+        setNumQubits(finalNumQubits);
+        if (visualizedQubit >= finalNumQubits) {
+            setVisualizedQubit(0);
+        }
+    }
+    
+    setPlacedGates(pendingGates);
+    setSelectedGateId(null); // Always deselect gates after an AI action
+
+  }, [numQubits, placedGates, visualizedQubit]);
+
 
   const handleSend = useCallback(async (prompt: string) => {
     if (prompt.trim() === '' || isAiLoading) return;
@@ -165,18 +206,6 @@ const App: React.FC = () => {
       handleSend(`Explain the ${gate.name} gate in simple terms, including its matrix and its effect on a qubit.`);
     }
   }, [handleSend]);
-
-  const handleNumQubitsChange = (newNumQubits: number) => {
-    if (newNumQubits >= 2 && newNumQubits <= 5) {
-      setNumQubits(newNumQubits);
-      setPlacedGates([]); // Clear circuit to prevent invalid gate placements
-      setSelectedGateId(null);
-      if (visualizedQubit >= newNumQubits) {
-        setVisualizedQubit(0);
-      }
-    }
-  };
-
 
   const handleGateDrop = (gateId: string, point: { x: number; y: number }) => {
     if (!canvasRef.current) return;

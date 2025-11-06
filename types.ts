@@ -20,7 +20,7 @@ export interface PlacedGate {
 }
 
 // Agent-related Types
-export type AgentName = 'Orchestrator' | 'Research' | 'Design' | 'Explanation';
+export type AgentName = 'Manager' | 'Research' | 'Critic' | 'Design' | 'Explanation';
 export type AgentStatus = 'running' | 'completed';
 
 export interface AgentStatusUpdate {
@@ -37,6 +37,7 @@ export type AIAction =
   | { type: 'clear_circuit'; payload: null }
   | { type: 'add_gate'; payload: AddGatePayload }
   | { type: 'replace_circuit'; payload: ReplaceCircuitPayload }
+  | { type: 'set_qubit_count'; payload: { count: number } }
   | { type: 'generate_code'; payload: null };
 
 export interface Source {

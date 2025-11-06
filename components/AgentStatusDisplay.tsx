@@ -1,18 +1,20 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentStatusUpdate } from '../types';
-import OrchestratorAgentIcon from './icons/OrchestratorAgentIcon';
+import ManagerAgentIcon from './icons/ManagerAgentIcon';
 import DesignAgentIcon from './icons/DesignAgentIcon';
 import ExplanationAgentIcon from './icons/ExplanationAgentIcon';
 import ResearchAgentIcon from './icons/ResearchAgentIcon';
+import CriticAgentIcon from './icons/CriticAgentIcon';
 
 interface AgentStatusDisplayProps {
   updates: AgentStatusUpdate[];
 }
 
 const agentIcons = {
-  Orchestrator: OrchestratorAgentIcon,
+  Manager: ManagerAgentIcon,
   Research: ResearchAgentIcon,
+  Critic: CriticAgentIcon,
   Design: DesignAgentIcon,
   Explanation: ExplanationAgentIcon,
 };
