@@ -73,3 +73,11 @@ export interface SimulationResult {
   probabilities: Probability[];
   stateVector: ComplexNumber[];
 }
+
+// Circuit Templates
+export interface CircuitTemplate {
+  id: string;
+  name: string;
+  description: string;
+  gates: AddGatePayload[];
+}

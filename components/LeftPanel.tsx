@@ -1,12 +1,15 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import type { QuantumGate } from '../types';
+import type { QuantumGate, CircuitTemplate } from '../types';
 import QuantumGateComponent from './QuantumGate';
 import { gates } from '../data/gates';
+import { templates } from '../data/circuitTemplates';
+import LogoIcon from './icons/LogoIcon';
 
 interface LeftPanelProps {
     onDragInitiate: (gate: QuantumGate, event: React.PointerEvent) => void;
     draggingGateId?: string;
+    onLoadTemplate: (template: CircuitTemplate) => void;
 }
 
 const DraggableGate: React.FC<{
@@ -32,7 +35,7 @@ const DraggableGate: React.FC<{
 }
 
 
-const LeftPanel: React.FC<LeftPanelProps> = ({ onDragInitiate, draggingGateId }) => {
+const LeftPanel: React.FC<LeftPanelProps> = ({ onDragInitiate, draggingGateId, onLoadTemplate }) => {
   return (
     <motion.aside
       initial={{ x: -300, opacity: 0 }}
@@ -51,6 +54,24 @@ const LeftPanel: React.FC<LeftPanelProps> = ({ onDragInitiate, draggingGateId })
             draggingGateId={draggingGateId}
             animationDelay={0.4 + index * 0.05}
           />
+        ))}
+        
+        <p className="text-xs text-gray-500 font-['IBM_Plex_Mono'] uppercase tracking-wider mt-4 mb-2">Templates</p>
+         {templates.map((template, index) => (
+          <motion.button
+            key={template.id}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3, delay: 0.4 + (gates.length + index) * 0.05 }}
+            onClick={() => onLoadTemplate(template)}
+            className="group relative flex items-center text-left w-full gap-3 p-2 rounded-md hover:bg-gray-700/50 transition-colors"
+            title={template.description}
+          >
+             <div className="w-8 h-8 rounded bg-gray-800 flex items-center justify-center border border-transparent group-hover:border-cyan-400/50">
+                <LogoIcon className="w-5 h-5 text-cyan-400/80" />
+            </div>
+            <span className="text-sm font-medium text-gray-300">{template.name}</span>
+          </motion.button>
         ))}
       </div>
     </motion.aside>

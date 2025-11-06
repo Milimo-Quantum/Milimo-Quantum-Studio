@@ -1,4 +1,4 @@
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { PlacedGate } from '../types';
 import { gateMap } from '../data/gates';
@@ -6,12 +6,14 @@ import CNOTGateIcon from './icons/CNOTGateIcon';
 import OptimizationAgentIcon from './icons/OptimizationAgentIcon';
 import TrashIcon from './icons/TrashIcon';
 import SwapTargetIcon from './icons/SwapTargetIcon';
+import ExplanationAgentIcon from './icons/ExplanationAgentIcon';
 
 interface CircuitCanvasProps {
   placedGates: PlacedGate[];
   isDragging: boolean;
   onOptimize: () => void;
   onClear: () => void;
+  onExplainGate: (gateId: string) => void;
   selectedGateId: string | null;
   onSelectGate: (instanceId: string) => void;
   visualizedQubit: number;
@@ -23,12 +25,17 @@ const QUBIT_LINE_HEIGHT = 64; // h-16
 const GATE_WIDTH = 40; // w-10
 const GATE_HEIGHT = 40; // h-10
 
-const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGates, isDragging, onOptimize, onClear, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit }, ref) => {
+const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGates, isDragging, onOptimize, onClear, onExplainGate, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit }, ref) => {
   
   const handleGateClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
     onSelectGate(instanceId);
   }
+  
+  const selectedGate = useMemo(() => {
+    return placedGates.find(g => g.instanceId === selectedGateId);
+  }, [placedGates, selectedGateId]);
+
 
   return (
     <motion.div
@@ -222,6 +229,20 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ placedGa
       </div>
       
       <div className="absolute top-2 right-4 flex items-center gap-2">
+         <AnimatePresence>
+          {selectedGate && (
+            <motion.button
+              initial={{ opacity: 0, width: 0 }}
+              animate={{ opacity: 1, width: 'auto' }}
+              exit={{ opacity: 0, width: 0 }}
+              onClick={() => onExplainGate(selectedGate.gateId)}
+              className="group flex items-center gap-2 text-xs font-mono bg-purple-500/20 text-purple-300 px-3 py-1.5 rounded-md hover:bg-purple-500/30 hover:text-purple-200 transition-all overflow-hidden whitespace-nowrap"
+            >
+              <ExplanationAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+              <span className="flex-shrink-0">Explain Gate</span>
+            </motion.button>
+          )}
+        </AnimatePresence>
          <button 
           onClick={onClear}
           className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-red-500/20 hover:text-red-300 transition-all"

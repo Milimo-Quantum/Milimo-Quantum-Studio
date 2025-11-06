@@ -3,7 +3,7 @@ import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import CircuitCanvas from './components/CircuitCanvas';
 import RightPanel from './components/RightPanel';
-import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult } from './types';
+import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, CircuitTemplate } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
 import { getAgentResponse } from './services/geminiService';
@@ -22,7 +22,7 @@ const App: React.FC = () => {
   const [visualizedQubit, setVisualizedQubit] = useState<number>(0);
   
   const [messages, setMessages] = useState<Message[]>([
-    { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. How can I help you design a circuit today? Try asking me to 'create a bell state'." },
+    { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. I can now analyze results and load templates. Try asking 'what is the probability of measuring |000>?' or 'load the bell state'." },
   ]);
   const [isAiLoading, setIsAiLoading] = useState(false);
 
@@ -107,7 +107,7 @@ const App: React.FC = () => {
     };
     
     try {
-      const aiResponse = await getAgentResponse(allMessages, placedGates, onStatusUpdate);
+      const aiResponse = await getAgentResponse(allMessages, placedGates, simulationResult, onStatusUpdate);
       if (aiResponse.actions.length > 0) {
         executeActions(aiResponse.actions);
       }
@@ -127,7 +127,7 @@ const App: React.FC = () => {
     } finally {
       setIsAiLoading(false);
     }
-  }, [isAiLoading, placedGates, messages, executeActions]);
+  }, [isAiLoading, placedGates, messages, executeActions, simulationResult]);
 
   const handleOptimize = useCallback(() => {
     handleSend("Optimize my current circuit");
@@ -141,6 +141,24 @@ const App: React.FC = () => {
   const handleShowVisualization = useCallback(() => {
     setActiveTab('visualization');
   }, []);
+  
+  const handleLoadTemplate = useCallback((template: CircuitTemplate) => {
+    const gatesWithIds = template.gates.map((g, i) => ({
+      ...g,
+      instanceId: `${g.gateId}-${Date.now()}-${i}`,
+    }));
+    setPlacedGates(gatesWithIds);
+    setSelectedGateId(null);
+    setActiveTab('visualization');
+  }, []);
+
+  const handleExplainGate = useCallback((gateId: string) => {
+    const gate = gateMap.get(gateId);
+    if (gate) {
+      handleSend(`Explain the ${gate.name} gate in simple terms, including its matrix and its effect on a qubit.`);
+    }
+  }, [handleSend]);
+
 
   const handleGateDrop = (gateId: string, point: { x: number; y: number }) => {
     if (!canvasRef.current) return;
@@ -228,7 +246,7 @@ const App: React.FC = () => {
             <span className="text-xs font-mono bg-gray-700/50 text-gray-400 px-2 py-0.5 rounded">Preview</span>
         </div>
         <main className="flex flex-grow p-4 gap-4">
-          <LeftPanel onDragInitiate={handleDragInitiate} draggingGateId={draggingGate?.gate.id} />
+          <LeftPanel onDragInitiate={handleDragInitiate} draggingGateId={draggingGate?.gate.id} onLoadTemplate={handleLoadTemplate}/>
           <div className="flex-grow flex flex-col gap-4">
             <CircuitCanvas 
               ref={canvasRef} 
@@ -236,6 +254,7 @@ const App: React.FC = () => {
               isDragging={isDragging} 
               onOptimize={handleOptimize}
               onClear={handleClearCircuit}
+              onExplainGate={handleExplainGate}
               selectedGateId={selectedGateId}
               onSelectGate={handleSelectGate}
               visualizedQubit={visualizedQubit}
