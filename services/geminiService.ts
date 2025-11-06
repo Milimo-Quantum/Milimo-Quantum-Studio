@@ -1,6 +1,5 @@
-import { GoogleGenAI, FunctionDeclaration, Type, Content, Part, FunctionCall } from "@google/genai";
-// FIX: Import the missing 'ReplaceCircuitPayload' type.
-import type { AIResponse, AgentStatusUpdate, PlacedGate, AIAction, Message, SimulationResult, AddGatePayload, ReplaceCircuitPayload } from "../types";
+import { GoogleGenAI, FunctionDeclaration, Type, Content, Part } from "@google/genai";
+import type { AIResponse, AgentStatusUpdate, PlacedGate, AIAction, Message, SimulationResult, ReplaceCircuitPayload, Source } from "../types";
 import { gateMap } from "../data/gates";
 import { templates, templateMap } from "../data/circuitTemplates";
 
@@ -19,14 +18,13 @@ const templateIds = Array.from(templateMap.keys());
 
 const addGateTool: FunctionDeclaration = {
   name: 'add_gate',
-  description: 'Adds a single quantum gate to a specific qubit on the circuit.',
   parameters: {
     type: Type.OBJECT,
     properties: {
-      gateId: { type: Type.STRING, description: 'The ID of the gate to add.', enum: gateIds },
-      qubit: { type: Type.INTEGER, description: 'The index of the qubit to apply the gate to (e.g., 0, 1, 2).' },
-      controlQubit: { type: Type.INTEGER, description: 'For controlled gates (cnot, cz, swap), this is the index of the other qubit involved.' },
-      left: { type: Type.NUMBER, description: 'The horizontal position of the gate on the circuit, as a percentage from the left (0-100).' },
+      gateId: { type: Type.STRING, enum: gateIds },
+      qubit: { type: Type.INTEGER },
+      controlQubit: { type: Type.INTEGER },
+      left: { type: Type.NUMBER },
     },
     required: ['gateId', 'qubit', 'left'],
   },
@@ -34,13 +32,11 @@ const addGateTool: FunctionDeclaration = {
 
 const replaceCircuitTool: FunctionDeclaration = {
   name: 'replace_circuit',
-  description: 'Replaces the entire existing circuit with a new set of gates. This is useful for complex operations like optimization or creating a completely new state.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       gates: {
         type: Type.ARRAY,
-        description: 'An array of gate objects to form the new circuit.',
         items: {
           type: Type.OBJECT,
           properties: {
@@ -57,46 +53,73 @@ const replaceCircuitTool: FunctionDeclaration = {
   }
 };
 
-const clearCircuitTool: FunctionDeclaration = {
-  name: 'clear_circuit',
-  description: 'Removes all gates from the circuit.',
-  parameters: { type: Type.OBJECT, properties: {} },
-};
-
-const generateCodeTool: FunctionDeclaration = {
-  name: 'generate_code',
-  description: 'Generates the Qiskit Python code for the current circuit and displays it to the user.',
-  parameters: { type: Type.OBJECT, properties: {} },
-};
-
 const getSimulationResultsTool: FunctionDeclaration = {
     name: 'get_simulation_results',
-    description: "Retrieves the current simulation's outcome, including measurement probabilities for each state. Use this to answer questions about the circuit's output.",
     parameters: { type: Type.OBJECT, properties: {} }
 };
 
 const loadTemplateTool: FunctionDeclaration = {
     name: 'load_template',
-    description: "Loads a predefined quantum circuit template onto the canvas. Use this as a starting point for common algorithms or states.",
     parameters: {
         type: Type.OBJECT,
         properties: {
-            templateId: { type: Type.STRING, description: "The ID of the template to load.", enum: templateIds }
+            templateId: { type: Type.STRING, enum: templateIds }
         },
         required: ['templateId']
     }
 }
 
-const getSystemInstruction = (numQubits: number) => `You are Milimo AI, an expert quantum circuit design assistant integrated into a web IDE.
-- Your primary goal is to help the user build, understand, and optimize quantum circuits.
-- You MUST use the provided tools to perform actions. Do not describe changes in text without calling the appropriate tool.
-- When the user asks to "see the code", use the 'generate_code' tool, then briefly explain it.
-- To answer questions about circuit results (e.g., "what's the probability of measuring |101>?"), you MUST use the 'get_simulation_results' tool first, then interpret the data in your answer.
-- You can load predefined circuits using 'load_template'. Suggest this when a user asks for a common state like an entangled state ('bell_state') or GHZ state ('ghz_state').
-- After using tools, provide a brief, friendly explanation of the action you took.
-- The circuit has ${numQubits} qubits (0 to ${numQubits - 1}). Ensure all 'qubit' and 'controlQubit' values are within this range.
+const designTools = [addGateTool, replaceCircuitTool, getSimulationResultsTool, loadTemplateTool];
+
+const orchestratorSystemInstruction = `You are the Orchestrator for Milimo AI, a team of specialized quantum AI agents. Your job is to analyze the user's request and the current application state, then decide which agent needs to be called to fulfill the request.
+
+You have two primary agents you can activate:
+1.  **Research Agent**: For requests that are abstract, creative, high-level, or require external knowledge (e.g., "build a circuit for quantum communication in spacecrafts", "what is quantum error correction?", "show me something for a quantum sensor").
+2.  **Design Agent**: For requests that are concrete, specific, and can be immediately translated into a circuit diagram (e.g., "create a bell state", "put a hadamard on qubit 0", "what's the probability of |101>?", "load the GHZ template").
+
+Based on the user's prompt, you must respond with a single JSON object with your decision.
+
+**Decision Schema:**
+{
+  "agent_to_call": "Research" | "Design",
+  "reasoning": "A brief explanation for your choice.",
+  "prompt_for_next_agent": "The refined prompt to pass to the chosen agent."
+}
+
+Example 1:
+User Prompt: "build a circuit which can be used in quantum entangle communication in space crafts"
+Your Response:
+{
+  "agent_to_call": "Research",
+  "reasoning": "The user's request is abstract and requires external knowledge about quantum communication protocols used in specific applications like spacecrafts. The Research agent needs to find the most relevant real-world algorithm or principle first.",
+  "prompt_for_next_agent": "Find the most fundamental quantum circuit or algorithm used for quantum entanglement communication, suitable for applications like spacecraft. Explain the principle and provide a step-by-step guide on how to build the circuit."
+}
+
+Example 2:
+User Prompt: "Make a GHZ state and then tell me the probability of measuring |000>"
+Your Response:
+{
+  "agent_to_call": "Design",
+  "reasoning": "The user's request is specific and involves direct circuit manipulation and simulation data retrieval, which are tasks for the Design agent.",
+  "prompt_for_next_agent": "First, load the 'ghz_state' template. Then, use the 'get_simulation_results' tool to find the probability of the |000> state. Finally, report this probability to the user."
+}`;
+
+const designAgentSystemInstruction = (numQubits: number, researchContext: string = '') => `You are the Design Agent for Milimo AI. Your purpose is to translate user requests and research findings into a concrete quantum circuit on the canvas using your available tools.
+
+**Circuit Constraints:**
+- The circuit has ${numQubits} qubits (indexed 0 to ${numQubits - 1}).
 - The 'left' parameter (0-100) dictates gate order. Choose sensible, spaced-out values (e.g., 20, 40, 60).
-- For controlled gates (cnot, cz, swap), you MUST specify both 'qubit' and 'controlQubit'.`;
+- For controlled gates, you MUST specify both 'qubit' and 'controlQubit'.
+
+**Core Directive:**
+- Execute the user's request precisely using your tools.
+- If you need to answer a question about the circuit's output (e.g., "what's the probability of measuring |101>?"), you MUST use the 'get_simulation_results' tool.
+- If the user asks for a named circuit, check if a template exists and use 'load_template' if it does. Otherwise, build it from scratch.
+- Prioritize using 'replace_circuit' for building new states to ensure the canvas is clean.
+
+${researchContext ? `**Research Context:**\nA Research Agent has provided the following information. You MUST use this context to inform your circuit design.\n---\n${researchContext}\n---` : ''}`;
+
+const explanationAgentSystemInstruction = `You are the Explanation Agent for Milimo AI. Your job is to provide a final, user-facing response that is clear, concise, and helpful. You will receive the user's initial prompt, the results of any research, and a summary of the actions taken by the Design Agent. Synthesize all this information into a single, cohesive answer. Explain WHAT was built and WHY it's relevant to the user's original request.`;
 
 
 export const getAgentResponse = async (
@@ -108,102 +131,119 @@ export const getAgentResponse = async (
 ): Promise<AIResponse> => {
   onStatusUpdate({ agent: 'Orchestrator', status: 'running', message: 'Analyzing request...' });
   
-  const history: Content[] = allMessages
-    .filter((m): m is Message & { type: 'text' } => m.type === 'text')
-    .map(m => ({
-      role: m.sender === 'ai' ? 'model' : 'user',
-      parts: [{ text: m.text }],
-    }));
+  // FIX: Replace findLast with a compatible alternative for older JS targets.
+  const lastUserMessage = [...allMessages].reverse().find(m => m.type === 'text' && m.sender === 'user');
+  const userPromptText = (lastUserMessage && lastUserMessage.type === 'text') ? lastUserMessage.text : '';
 
-  const userPrompt = history.pop();
-  if (!userPrompt) return { displayText: 'An error occurred.', actions: [] };
-
-  const promptWithContext = `Current circuit: ${JSON.stringify(currentCircuit)}\n\nUser request: ${userPrompt.parts[0].text}`;
-  userPrompt.parts[0].text = promptWithContext;
-
-  const initialResponse = await ai.models.generateContent({
+  // 1. Orchestrator Agent: Decide which agent to call next
+  const orchestratorResponse = await ai.models.generateContent({
     model,
-    contents: [...history, userPrompt],
-    config: {
-        tools: [{ functionDeclarations: [addGateTool, replaceCircuitTool, clearCircuitTool, generateCodeTool, getSimulationResultsTool, loadTemplateTool] }],
-    },
-    systemInstruction: getSystemInstruction(numQubits)
+    contents: [{ role: 'user', parts: [{ text: userPromptText }] }],
+    config: { responseMimeType: 'application/json' }
   });
+
+  let orchestratorDecision;
+  try {
+      orchestratorDecision = JSON.parse(orchestratorResponse.text);
+  } catch (e) {
+      // Fallback for non-JSON response
+      return { displayText: "I'm sorry, I had trouble understanding that request. Could you please rephrase?", actions: [] };
+  }
 
   onStatusUpdate({ agent: 'Orchestrator', status: 'completed', message: 'Plan generated.' });
 
-  const actions: AIAction[] = [];
-  let displayText = initialResponse.text || "I've performed the requested action.";
+  let researchContext = '';
+  let sources: Source[] | undefined = undefined;
 
-  if (initialResponse.functionCalls && initialResponse.functionCalls.length > 0) {
-    onStatusUpdate({ agent: 'Design', status: 'running', message: 'Executing tools...' });
+  // 2. Research Agent (Optional)
+  if (orchestratorDecision.agent_to_call === 'Research') {
+    onStatusUpdate({ agent: 'Research', status: 'running', message: 'Searching for information...' });
     
-    const functionCallPart: Part = { functionCall: initialResponse.functionCalls[0] }; // This is simplified; real use might have multiple
-    const toolResponses: Part[] = [];
-
-    for (const funcCall of initialResponse.functionCalls) {
-        let toolResponse: object | null = null;
-        switch(funcCall.name) {
-            case 'add_gate':
-                actions.push({ type: 'add_gate', payload: funcCall.args as any });
-                toolResponse = { result: "ok" };
-                break;
-            case 'replace_circuit':
-                actions.push({ type: 'replace_circuit', payload: (funcCall.args as any).gates });
-                toolResponse = { result: "ok" };
-                break;
-            case 'clear_circuit':
-                actions.push({ type: 'clear_circuit', payload: null });
-                toolResponse = { result: "ok" };
-                break;
-            case 'generate_code':
-                actions.push({ type: 'generate_code', payload: null });
-                toolResponse = { result: "ok" };
-                break;
-            case 'load_template':
-                const template = templateMap.get((funcCall.args as any).templateId);
-                if (template) {
-                    actions.push({ type: 'replace_circuit', payload: template.gates as ReplaceCircuitPayload });
-                }
-                toolResponse = { result: "ok" };
-                break;
-            case 'get_simulation_results':
-                toolResponse = { result: simulationResult ? JSON.stringify(simulationResult.probabilities) : "No simulation data available." };
-                break;
-        }
-
-        if(toolResponse) {
-             toolResponses.push({
-                toolResponse: {
-                    name: funcCall.name,
-                    response: toolResponse,
-                }
-            });
-        }
+    const researchResponse = await ai.models.generateContent({
+      model,
+      contents: [{ role: 'user', parts: [{ text: orchestratorDecision.prompt_for_next_agent }] }],
+      config: { tools: [{ googleSearch: {} }] }
+    });
+    
+    researchContext = researchResponse.text;
+    const groundingMetadata = researchResponse.candidates?.[0]?.groundingMetadata;
+    if (groundingMetadata?.groundingChunks) {
+        sources = groundingMetadata.groundingChunks
+            .map(chunk => ({ uri: chunk.web?.uri || '', title: chunk.web?.title || 'Untitled' }))
+            .filter(source => source.uri);
     }
-    
-    onStatusUpdate({ agent: 'Design', status: 'completed', message: 'Modifications ready.' });
-    
-    // If there were any tool calls, especially ones that require a textual response,
-    // send the results back to the model to generate the final display text.
-    if(toolResponses.length > 0) {
-        onStatusUpdate({ agent: 'Explanation', status: 'running', message: 'Generating explanation...' });
-        
-        const secondResponse = await ai.models.generateContent({
-            model,
-            contents: [...history, userPrompt, functionCallPart, ...toolResponses]
-        });
-        displayText = secondResponse.text || "I've performed the requested actions.";
-        onStatusUpdate({ agent: 'Explanation', status: 'completed', message: 'Explanation ready.' });
-    }
-
-  } else {
-     onStatusUpdate({ agent: 'Explanation', status: 'running', message: 'Generating response...' });
-     onStatusUpdate({ agent: 'Explanation', status: 'completed', message: 'Response ready.' });
+    onStatusUpdate({ agent: 'Research', status: 'completed', message: 'Context gathered.' });
   }
+
+  // 3. Design Agent: Always runs, but may have research context
+  onStatusUpdate({ agent: 'Design', status: 'running', message: 'Constructing circuit...' });
+  const actions: AIAction[] = [];
+  const history: Content[] = [];
+  const designPrompt = orchestratorDecision.prompt_for_next_agent;
   
-  return { displayText, actions };
+  const designResponse = await ai.models.generateContent({
+      model,
+      contents: [{ role: 'user', parts: [{ text: designPrompt }] }],
+      config: { tools: [{ functionDeclarations: designTools }] },
+      systemInstruction: designAgentSystemInstruction(numQubits, researchContext)
+  });
+  
+  const toolResponses: Part[] = [];
+
+  if (designResponse.functionCalls && designResponse.functionCalls.length > 0) {
+      for (const funcCall of designResponse.functionCalls) {
+          let toolResponse: object | null = null;
+          switch(funcCall.name) {
+              case 'replace_circuit':
+                  actions.push({ type: 'replace_circuit', payload: (funcCall.args as any).gates });
+                  toolResponse = { result: "ok, circuit replaced" };
+                  break;
+              case 'load_template':
+                  const template = templateMap.get((funcCall.args as any).templateId);
+                  if (template) {
+                      actions.push({ type: 'replace_circuit', payload: template.gates as ReplaceCircuitPayload });
+                  }
+                  toolResponse = { result: `ok, loaded ${template?.name}` };
+                  break;
+              case 'get_simulation_results':
+                  toolResponse = { result: simulationResult ? JSON.stringify(simulationResult.probabilities) : "No simulation data." };
+                  break;
+          }
+          if(toolResponse) {
+               toolResponses.push({ toolResponse: { name: funcCall.name, response: toolResponse } });
+          }
+      }
+      history.push({role: 'model', parts: [{ functionCall: designResponse.functionCalls[0] }]});
+      history.push({role: 'user', parts: toolResponses});
+  }
+  onStatusUpdate({ agent: 'Design', status: 'completed', message: 'Circuit built.' });
+  
+  // 4. Explanation Agent
+  onStatusUpdate({ agent: 'Explanation', status: 'running', message: 'Generating explanation...' });
+  
+  const explanationContext = `The user's original request was: "${userPromptText}".
+  ${researchContext ? `Research found: "${researchContext}"` : ''}
+  The design agent took the following actions: ${actions.map(a => a.type).join(', ') || 'None'}.
+  Please provide a comprehensive explanation for the user.`;
+
+  const finalContents: Content[] = [
+    {role: 'user', parts: [{text: designPrompt}]},
+    ...history,
+    {role: 'user', parts: [{text: explanationContext}]}
+  ];
+
+  const explanationResponse = await ai.models.generateContent({
+      model,
+      contents: finalContents,
+      systemInstruction: explanationAgentSystemInstruction,
+  });
+
+  const displayText = explanationResponse.text;
+  onStatusUpdate({ agent: 'Explanation', status: 'completed', message: 'Response ready.' });
+  
+  return { displayText, actions, sources };
 };
+
 
 export const generateQiskitCode = (placedGates: PlacedGate[], numQubits: number): string => {
     const sortedGates = [...placedGates].sort((a, b) => a.left - b.left);

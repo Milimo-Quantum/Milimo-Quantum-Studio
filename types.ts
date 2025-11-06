@@ -20,7 +20,7 @@ export interface PlacedGate {
 }
 
 // Agent-related Types
-export type AgentName = 'Orchestrator' | 'Design' | 'Optimization' | 'Explanation';
+export type AgentName = 'Orchestrator' | 'Research' | 'Design' | 'Explanation';
 export type AgentStatus = 'running' | 'completed';
 
 export interface AgentStatusUpdate {
@@ -39,10 +39,15 @@ export type AIAction =
   | { type: 'replace_circuit'; payload: ReplaceCircuitPayload }
   | { type: 'generate_code'; payload: null };
 
+export interface Source {
+  title: string;
+  uri: string;
+}
 
 export interface AIResponse {
   displayText: string;
   actions: AIAction[];
+  sources?: Source[];
 }
 
 // UI Message Types
@@ -50,6 +55,7 @@ export interface TextMessage {
   type: 'text';
   sender: 'user' | 'ai';
   text: string;
+  sources?: Source[];
 }
 
 export interface AgentStatusMessage {

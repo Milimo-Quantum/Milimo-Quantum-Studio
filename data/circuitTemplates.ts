@@ -20,6 +20,21 @@ export const templates: CircuitTemplate[] = [
       { gateId: 'cnot', controlQubit: 0, qubit: 2, left: 80 },
     ],
   },
+  {
+    id: 'quantum_teleportation',
+    name: 'Quantum Teleportation',
+    description: 'The core quantum circuit for the teleportation protocol (pre-measurement). Requires 3 qubits.',
+    gates: [
+       // Create Bell pair between q1 and q2
+      { gateId: 'h', qubit: 1, left: 10 },
+      { gateId: 'cnot', controlQubit: 1, qubit: 2, left: 30 },
+       // Entangle q0 (the message) with q1
+      { gateId: 'cnot', controlQubit: 0, qubit: 1, left: 50 },
+      { gateId: 'h', qubit: 0, left: 70 },
+       // In a real scenario, measurements on q0 and q1 would follow,
+       // with classical communication to apply conditional X and Z gates to q2.
+    ]
+  }
 ];
 
 export const templateMap = new Map(templates.map(t => [t.id, t]));

@@ -21,7 +21,7 @@ const App: React.FC = () => {
   const [visualizedQubit, setVisualizedQubit] = useState<number>(0);
   
   const [messages, setMessages] = useState<Message[]>([
-    { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. I can now analyze results and load templates. Try asking 'what is the probability of measuring |000>?' or 'load the bell state'." },
+    { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. I can design circuits from scratch. Try asking me to 'build the quantum teleportation protocol' or 'create a GHZ state'." },
   ]);
   const [isAiLoading, setIsAiLoading] = useState(false);
 
@@ -110,7 +110,12 @@ const App: React.FC = () => {
       if (aiResponse.actions.length > 0) {
         executeActions(aiResponse.actions);
       }
-      const aiMessage: Message = { type: 'text', sender: 'ai', text: aiResponse.displayText };
+      const aiMessage: Message = { 
+        type: 'text', 
+        sender: 'ai', 
+        text: aiResponse.displayText,
+        sources: aiResponse.sources,
+      };
       setMessages(prev => {
         const finalMessages = prev.slice(0, -1); // Remove the status message
         return [...finalMessages, aiMessage];
@@ -129,7 +134,7 @@ const App: React.FC = () => {
   }, [isAiLoading, placedGates, messages, executeActions, simulationResult, numQubits]);
 
   const handleOptimize = useCallback(() => {
-    handleSend("Optimize my current circuit");
+    handleSend("Analyze my current circuit. Identify its purpose if it's a known algorithm or state, suggest any optimizations, and propose potential next steps or interesting modifications.");
   }, [handleSend]);
   
   const handleClearCircuit = useCallback(() => {

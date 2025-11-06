@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentStatusUpdate } from '../types';
 import OrchestratorAgentIcon from './icons/OrchestratorAgentIcon';
 import DesignAgentIcon from './icons/DesignAgentIcon';
-import OptimizationAgentIcon from './icons/OptimizationAgentIcon';
 import ExplanationAgentIcon from './icons/ExplanationAgentIcon';
+import ResearchAgentIcon from './icons/ResearchAgentIcon';
 
 interface AgentStatusDisplayProps {
   updates: AgentStatusUpdate[];
@@ -12,8 +12,8 @@ interface AgentStatusDisplayProps {
 
 const agentIcons = {
   Orchestrator: OrchestratorAgentIcon,
+  Research: ResearchAgentIcon,
   Design: DesignAgentIcon,
-  Optimization: OptimizationAgentIcon,
   Explanation: ExplanationAgentIcon,
 };
 
