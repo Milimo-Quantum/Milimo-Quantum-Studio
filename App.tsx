@@ -59,7 +59,7 @@ export const App: React.FC = () => {
   const [simulationStep, setSimulationStep] = useState<number | null>(null);
   
   const [messages, setMessages] = useState<Message[]>([
-    { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. I can research and build advanced quantum circuits from scratch. Challenge me with a concept like 'quantum error correction' or 'the BB84 protocol'." },
+    { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. You can give me complex challenges like 'build a quantum teleportation circuit' or give me step-by-step instructions like 'add a Hadamard to qubit 0'." },
   ]);
   const [isAiLoading, setIsAiLoading] = useState(false);
 

@@ -44,24 +44,36 @@ ${sotaConceptsLibrary}
 
 **Core Directives:**
 1.  **Analyze User Intent:**
-    - **Build/Research:** If the user asks to build, create, or show something new, formulate a research-critic-design plan.
+    - **Complex Build/Research:** If the user asks to build, create, or show an abstract concept (e.g., "teleportation", "error correction"), formulate a research-critic-design plan.
+    - **Simple Command:** If the user gives a direct, simple command like "add a Hadamard to qubit 0" or "put a CNOT from 0 to 1", create a single-step plan with just a "Design" agent. The prompt for the Design agent should be the user's exact command. This is for fast, conversational building.
     - **Analyze:** If the user asks to "analyze the current circuit", your output plan MUST be an empty array: \`[]\`. The Explanation agent will handle this.
     - **Debug:** If the user asks to "debug" or "fix" the circuit, create a plan with a single "Debugger" step.
     - **Optimize:** If the user asks to "optimize" or "simplify" the circuit, create a plan with a single "Optimizer" step.
-2.  **Prioritize the Ideal Solution:** For build requests, determine the best, most advanced circuit. Formulate a plan to build it directly if it fits, or adapt the canvas first if necessary.
+2.  **Prioritize the Ideal Solution:** For complex build requests, determine the best, most advanced circuit. Formulate a plan to build it directly if it fits, or adapt the canvas first if necessary.
 3.  **Mandatory Quality Assurance:** For any abstract or complex request that requires research to build a new circuit, your plan MUST include a 'Critic' step immediately after the 'Research' step.
 4.  **Formulate the Plan:** Your output MUST be a single JSON object containing a "plan" array.
 
-**Example: Optimize Request**
-*User Prompt:* "make this circuit better"
+**Example: Simple Command**
+*User Prompt:* "add a hadamard to qubit 1 at 50%"
 *Your JSON Output:*
 {
   "plan": [
     {
-      "agent_to_call": "Optimizer",
-      "reasoning": "The user wants to improve the current circuit. I will deploy the Optimizer agent to find and apply simplifications.",
-      "prompt": ""
+      "agent_to_call": "Design",
+      "reasoning": "User issued a direct command to add a gate. I will pass this to the Design agent for immediate execution.",
+      "prompt": "add a hadamard to qubit 1 at 50%"
     }
+  ]
+}
+
+**Example: Complex Request**
+*User Prompt:* "Show me quantum error correction"
+*Your JSON Output:*
+{
+  "plan": [
+    { "agent_to_call": "Research", ... },
+    { "agent_to_call": "Critic", ... },
+    { "agent_to_call": "Design", ... }
   ]
 }`;
 
@@ -184,9 +196,10 @@ export const getAgentResponse = async (
   onStatusUpdate: (update: AgentStatusUpdate) => void
 ): Promise<AIResponse> => {
     
-    const lastUserMessage = [...allMessages].reverse().find(m => m.type === 'text' && m.sender === 'user');
-    const userPromptText = (lastUserMessage?.type === 'text') ? lastUserMessage.text : '';
-
+    const textMessages = allMessages.filter((m): m is Extract<Message, {type: 'text'}> => m.type === 'text');
+    const conversationHistory = textMessages.slice(-6).map(m => `${m.sender}: ${m.text}`).join('\n');
+    const userPromptText = textMessages[textMessages.length - 1]?.text || '';
+    
     const circuitDescriptionForManager = currentCircuit.length > 0
         ? JSON.stringify(currentCircuit.map(g => ({ gate: g.gateId, qubit: g.qubit, control: g.controlQubit, position: g.left })))
         : 'The circuit is currently empty.';
@@ -194,7 +207,7 @@ export const getAgentResponse = async (
     onStatusUpdate({ agent: 'Manager', status: 'running', message: 'Creating project plan...' });
     const managerResponse = await ai.models.generateContent({
         model,
-        contents: [{ role: 'user', parts: [{ text: userPromptText }] }],
+        contents: [{ role: 'user', parts: [{ text: `**Conversation History:**\n${conversationHistory}\n\n**Latest User Request:**\n${userPromptText}` }] }],
         config: { systemInstruction: managerSystemInstruction(numQubits, circuitDescriptionForManager), responseMimeType: 'application/json', responseSchema: managerSchema }
     });
     const plan = JSON.parse(managerResponse.text).plan;
@@ -396,6 +409,14 @@ export const getAgentResponse = async (
         })).sort((a,b) => a.position - b.position),
     };
 
+    // If it was a simple design-only plan, no need for a complex explanation.
+    if (plan.length === 1 && plan[0].agent_to_call === 'Design') {
+        return {
+            displayText: `Done. I've updated the circuit as you requested.`,
+            actions: executionContext.designActions,
+            sources: executionContext.sources,
+        };
+    }
 
     // Explanation Agent
     onStatusUpdate({ agent: 'Explanation', status: 'running', message: 'Synthesizing final response...' });
