@@ -47,18 +47,19 @@ ${sotaConceptsLibrary}
     - **Build/Research:** If the user asks to build, create, or show something new, formulate a research-critic-design plan.
     - **Analyze:** If the user asks to "analyze the current circuit", your output plan MUST be an empty array: \`[]\`. The Explanation agent will handle this.
     - **Debug:** If the user asks to "debug" or "fix" the circuit, create a plan with a single "Debugger" step.
+    - **Optimize:** If the user asks to "optimize" or "simplify" the circuit, create a plan with a single "Optimizer" step.
 2.  **Prioritize the Ideal Solution:** For build requests, determine the best, most advanced circuit. Formulate a plan to build it directly if it fits, or adapt the canvas first if necessary.
 3.  **Mandatory Quality Assurance:** For any abstract or complex request that requires research to build a new circuit, your plan MUST include a 'Critic' step immediately after the 'Research' step.
 4.  **Formulate the Plan:** Your output MUST be a single JSON object containing a "plan" array.
 
-**Example: Debug Request**
-*User Prompt:* "fix this circuit, it's not working"
+**Example: Optimize Request**
+*User Prompt:* "make this circuit better"
 *Your JSON Output:*
 {
   "plan": [
     {
-      "agent_to_call": "Debugger",
-      "reasoning": "The user wants to fix the current circuit. I will deploy the Debugger agent to analyze it and propose a correction.",
+      "agent_to_call": "Optimizer",
+      "reasoning": "The user wants to improve the current circuit. I will deploy the Optimizer agent to find and apply simplifications.",
       "prompt": ""
     }
   ]
@@ -72,7 +73,7 @@ const managerSchema = {
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    agent_to_call: { type: Type.STRING, enum: ['Research', 'Critic', 'Design', 'Explanation', 'Debugger'] },
+                    agent_to_call: { type: Type.STRING, enum: ['Research', 'Critic', 'Design', 'Explanation', 'Debugger', 'Optimizer'] },
                     reasoning: { type: Type.STRING },
                     prompt: { type: Type.STRING },
                 },
@@ -143,6 +144,22 @@ ${circuitDescription}
 4.  **Explain:** After calling the tool, provide a brief, user-facing explanation of the fix.
 `;
 
+const optimizerAgentSystemInstruction = (circuitDescription: string) => `You are the Optimizer Agent for Milimo AI, a quantum circuit optimization specialist. Your job is to analyze a user's circuit for inefficiencies and apply simplifications to reduce gate count and depth.
+
+**Current Circuit State:**
+${circuitDescription}
+
+**Common Quantum Circuit Optimizations:**
+- **Gate Cancellation:** Two identical self-inverse gates in a row (e.g., H-H, X-X, CNOT-CNOT) on the same qubit(s) cancel each other out and can be removed.
+- **Identity Removal:** An identity gate (which does nothing) can be removed.
+- **Redundant Rotations:** Combining consecutive rotation gates (e.g., two Z-rotations) into a single rotation. (Note: The current gate set has fixed rotations, so focus on cancellations).
+
+**Your Task:**
+1.  **Analyze:** Carefully examine the provided circuit state for any of the optimization opportunities listed above, primarily focusing on gate cancellations.
+2.  **Optimize:** If you find an optimization, use the \`replace_circuit\` tool to provide the full, simplified circuit. Remove the unnecessary gates entirely.
+3.  **Explain:** After calling the tool, provide a brief, user-facing explanation of the optimization you performed (e.g., "I removed a pair of consecutive Hadamard gates on qubit 0 as they cancel each other out."). If no optimizations can be found, state that the circuit is already efficient.
+`;
+
 
 const explanationAgentSystemInstruction = `You are the Explanation Agent for Milimo AI. Your job is to provide a final, user-facing response that synthesizes the entire problem-solving journey using a strict analytical process.
 
@@ -192,6 +209,30 @@ export const getAgentResponse = async (
         sources: undefined as Source[] | undefined,
         explanationText: '',
     };
+    
+    const optimizerStep = plan.find((step: any) => step.agent_to_call === 'Optimizer');
+    if (optimizerStep) {
+        onStatusUpdate({ agent: 'Optimizer', status: 'running', message: optimizerStep.reasoning });
+        const optimizerResponse = await ai.models.generateContent({
+            model,
+            contents: [{ role: 'user', parts: [{ text: `User wants to optimize this circuit. Please analyze and respond.` }] }],
+            config: { tools: [{ functionDeclarations: [replaceCircuitTool] }], systemInstruction: optimizerAgentSystemInstruction(circuitDescriptionForManager) },
+        });
+
+        if (optimizerResponse.functionCalls && optimizerResponse.functionCalls.length > 0) {
+            const replaceCall = optimizerResponse.functionCalls.find(fc => fc.name === 'replace_circuit');
+            if (replaceCall) {
+                executionContext.designActions.push({ type: 'replace_circuit', payload: (replaceCall.args as any).gates });
+            }
+        }
+        executionContext.explanationText = optimizerResponse.text; // The optimizer's explanation is the final text
+        onStatusUpdate({ agent: 'Optimizer', status: 'completed', message: 'Optimization analysis complete.' });
+        return { 
+            displayText: executionContext.explanationText, 
+            actions: executionContext.designActions,
+            sources: executionContext.sources 
+        };
+    }
     
     const debuggerStep = plan.find((step: any) => step.agent_to_call === 'Debugger');
     if (debuggerStep) {

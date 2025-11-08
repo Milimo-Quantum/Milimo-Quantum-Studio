@@ -26,7 +26,7 @@ export interface CircuitState {
 
 
 // Agent-related Types
-export type AgentName = 'Manager' | 'Research' | 'Critic' | 'Design' | 'Explanation' | 'Debugger';
+export type AgentName = 'Manager' | 'Research' | 'Critic' | 'Design' | 'Explanation' | 'Debugger' | 'Optimizer';
 export type AgentStatus = 'running' | 'completed';
 
 export interface AgentStatusUpdate {

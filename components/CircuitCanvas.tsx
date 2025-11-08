@@ -10,6 +10,7 @@ import PlusIcon from './icons/PlusIcon';
 import MinusIcon from './icons/MinusIcon';
 import ResearchAgentIcon from './icons/ResearchAgentIcon';
 import DebuggerAgentIcon from './icons/DebuggerAgentIcon';
+import OptimizerAgentIcon from './icons/OptimizerAgentIcon';
 import PlayIcon from './icons/PlayIcon';
 
 interface CircuitCanvasProps {
@@ -19,6 +20,7 @@ interface CircuitCanvasProps {
   isDragging: boolean;
   onAnalyzeCircuit: () => void;
   onDebugCircuit: () => void;
+  onOptimizeCircuit: () => void;
   onClear: () => void;
   onExplainGate: (gateId: string) => void;
   selectedGateId: string | null;
@@ -33,7 +35,7 @@ const QUBIT_LINE_HEIGHT = 64; // h-16
 const GATE_WIDTH = 40; // w-10
 const GATE_HEIGHT = 40; // h-10
 
-const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedGates, isDragging, onAnalyzeCircuit, onDebugCircuit, onClear, onExplainGate, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit, simulationStep, setSimulationStep }, ref) => {
+const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedGates, isDragging, onAnalyzeCircuit, onDebugCircuit, onOptimizeCircuit, onClear, onExplainGate, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit, simulationStep, setSimulationStep }, ref) => {
   
   const handleGateClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
@@ -307,6 +309,13 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
         >
           <DebuggerAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
           Debug Circuit
+        </button>
+        <button 
+          onClick={onOptimizeCircuit}
+          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-green-500/20 hover:text-green-300 transition-all"
+        >
+          <OptimizerAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
+          Optimize Circuit
         </button>
         <button 
           onClick={onAnalyzeCircuit}

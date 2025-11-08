@@ -16,6 +16,28 @@ const INITIAL_STATE: CircuitState = {
   placedGates: [],
 };
 
+const encodeCircuit = (data: CircuitState): string => {
+  try {
+    const jsonString = JSON.stringify(data);
+    return btoa(jsonString).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  } catch (e) {
+    console.error("Failed to encode circuit", e);
+    return "";
+  }
+};
+
+const decodeCircuit = (encoded: string): CircuitState | null => {
+  try {
+    const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonString = atob(base64);
+    return JSON.parse(jsonString);
+  } catch (e) {
+    console.error("Failed to decode circuit", e);
+    return null;
+  }
+};
+
+
 export const App: React.FC = () => {
   const { 
     state, 
@@ -43,6 +65,21 @@ export const App: React.FC = () => {
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragInfoRef = useRef<{ gate: QuantumGate | null }>({ gate: null });
+
+  // --- Load from URL on mount ---
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const circuitData = urlParams.get('circuit');
+    if (circuitData) {
+      const decodedState = decodeCircuit(circuitData);
+      if (decodedState) {
+        if (typeof decodedState.numQubits === 'number' && Array.isArray(decodedState.placedGates)) {
+          setState(decodedState, true); // Overwrite history
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }
+    }
+  }, []); // Empty array ensures this runs only once on mount
 
   // --- Live & Stepped Simulation Engine ---
   useEffect(() => {
@@ -234,6 +271,10 @@ export const App: React.FC = () => {
       handleSend("Debug my current circuit. Identify any logical errors or common mistakes for known algorithms. Explain the issue and, if possible, provide a corrected version of the circuit.");
   }, [handleSend]);
 
+  const handleOptimizeCircuit = useCallback(() => {
+      handleSend("Optimize my current circuit. Look for gate simplifications or ways to reduce the circuit depth and apply the changes.");
+  }, [handleSend]);
+
   const handleClearCircuit = useCallback(() => {
     setState({ ...state, placedGates: [] });
     setSelectedGateId(null);
@@ -344,6 +385,14 @@ export const App: React.FC = () => {
     }
   }, [setState]);
 
+  const handleShare = useCallback(() => {
+    const encodedState = encodeCircuit(state);
+    if (encodedState) {
+      const url = `${window.location.origin}${window.location.pathname}?circuit=${encodedState}`;
+      navigator.clipboard.writeText(url);
+    }
+  }, [state]);
+
   return (
     <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => setSelectedGateId(null)}>
       <div className="absolute inset-0 z-0 opacity-20">
@@ -360,6 +409,7 @@ export const App: React.FC = () => {
             canRedo={canRedo}
             onSave={handleSave}
             onLoad={handleLoad}
+            onShare={handleShare}
         />
          <div className="px-4 pt-2">
             <span className="text-xs font-mono bg-gray-700/50 text-gray-400 px-2 py-0.5 rounded">Preview</span>
@@ -375,6 +425,7 @@ export const App: React.FC = () => {
               isDragging={isDragging} 
               onAnalyzeCircuit={handleAnalyzeCircuit}
               onDebugCircuit={handleDebugCircuit}
+              onOptimizeCircuit={handleOptimizeCircuit}
               onClear={handleClearCircuit}
               onExplainGate={handleExplainGate}
               selectedGateId={selectedGateId}

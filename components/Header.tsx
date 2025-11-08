@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import LogoIcon from './icons/LogoIcon';
 import PlayIcon from './icons/PlayIcon';
@@ -6,6 +6,7 @@ import UndoIcon from './icons/UndoIcon';
 import RedoIcon from './icons/RedoIcon';
 import SaveIcon from './icons/SaveIcon';
 import LoadIcon from './icons/LoadIcon';
+import ShareIcon from './icons/ShareIcon';
 
 interface HeaderProps {
   onShowVisualization: () => void;
@@ -15,9 +16,18 @@ interface HeaderProps {
   canRedo: boolean;
   onSave: () => void;
   onLoad: () => void;
+  onShare: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ onShowVisualization, onUndo, onRedo, canUndo, canRedo, onSave, onLoad }) => {
+const Header: React.FC<HeaderProps> = ({ onShowVisualization, onUndo, onRedo, canUndo, canRedo, onSave, onLoad, onShare }) => {
+  const [isCopied, setIsCopied] = useState(false);
+
+  const handleShareClick = () => {
+    onShare();
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+  
   return (
     <motion.header
       initial={{ y: -100, opacity: 0 }}
@@ -38,6 +48,13 @@ const Header: React.FC<HeaderProps> = ({ onShowVisualization, onUndo, onRedo, ca
         </button>
         <button onClick={onLoad} className="group flex items-center gap-1.5 px-3 py-1.5 text-gray-400 hover:text-white rounded-md hover:bg-gray-700/50 transition-colors" title="Load Circuit (Ctrl+L)">
             <LoadIcon className="w-4 h-4" />
+        </button>
+        <button onClick={handleShareClick} className="group flex items-center gap-1.5 px-3 py-1.5 text-gray-400 hover:text-white rounded-md hover:bg-gray-700/50 transition-colors w-28 justify-center" title="Share Circuit (Copy Link)">
+            {isCopied ? (
+                <span className="text-xs text-cyan-300">Link Copied!</span>
+            ) : (
+                <ShareIcon className="w-4 h-4" />
+            )}
         </button>
         <div className="w-px h-5 bg-gray-600/50 mx-1"></div>
         <button onClick={onUndo} disabled={!canUndo} className="group flex items-center gap-1.5 px-3 py-1.5 text-gray-400 hover:text-white rounded-md hover:bg-gray-700/50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed" title="Undo (Ctrl+Z)">
