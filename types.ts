@@ -116,3 +116,6 @@ export interface SimulationResult {
   qubitStates: QubitState[];
   trace: number; // For debugging, should be ~1.0
 }
+
+// Hardware Job Types
+export type JobStatus = 'idle' | 'submitted' | 'queued' | 'running' | 'completed' | 'error';

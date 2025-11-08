@@ -4,7 +4,7 @@ import CopilotChat from './CopilotChat';
 import VisualizationPanel from './VisualizationPanel';
 import CodePanel from './CodePanel';
 import HardwarePanel from './HardwarePanel';
-import type { Message, SimulationResult, PlacedItem, CustomGateDefinition, RightPanelTab } from '../types';
+import type { Message, SimulationResult, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus } from '../types';
 import ChipIcon from './icons/ChipIcon';
 
 interface RightPanelProps {
@@ -24,7 +24,9 @@ interface RightPanelProps {
   setPhaseDampingError: (value: number) => void;
   hardwareResult: SimulationResult | null;
   isHardwareRunning: boolean;
-  onRunOnHardware: () => void;
+  onRunOnHardware: (apiKey: string) => void;
+  jobId: string | null;
+  jobStatus: JobStatus;
 }
 
 const RightPanel: React.FC<RightPanelProps> = (props) => {
@@ -42,7 +44,9 @@ const RightPanel: React.FC<RightPanelProps> = (props) => {
     setPhaseDampingError,
     hardwareResult,
     isHardwareRunning,
-    onRunOnHardware
+    onRunOnHardware,
+    jobId,
+    jobStatus,
   } = props;
 
   const tabs: { id: RightPanelTab, label: string }[] = [
@@ -95,7 +99,12 @@ const RightPanel: React.FC<RightPanelProps> = (props) => {
             isHardwareRunning={isHardwareRunning}
           />}
           {activeTab === 'code' && <CodePanel placedItems={placedItems} customGateDefs={customGateDefs} numQubits={numQubits} />}
-          {activeTab === 'hardware' && <HardwarePanel onRunOnHardware={onRunOnHardware} isRunning={isHardwareRunning} />}
+          {activeTab === 'hardware' && <HardwarePanel 
+            onRunOnHardware={onRunOnHardware} 
+            isRunning={isHardwareRunning} 
+            jobId={jobId}
+            jobStatus={jobStatus}
+          />}
         </AnimatePresence>
       </div>
     </motion.aside>

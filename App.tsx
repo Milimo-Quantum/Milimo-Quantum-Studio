@@ -3,7 +3,7 @@ import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import CircuitCanvas from './components/CircuitCanvas';
 import RightPanel from './components/RightPanel';
-import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab } from './types';
+import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
 import { getAgentResponse, getTutorResponse } from './services/geminiService';
@@ -76,7 +76,8 @@ export const App: React.FC = () => {
   
   // --- Hardware Run State ---
   const [hardwareResult, setHardwareResult] = useState<SimulationResult | null>(null);
-  const [isHardwareRunning, setIsHardwareRunning] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<JobStatus>('idle');
 
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -524,17 +525,29 @@ export const App: React.FC = () => {
 
   }, [placedItems, selectedItemIds, state, customGateDefinitions, setState]);
 
-  const handleRunOnHardware = useCallback(async () => {
-    if (isHardwareRunning) return;
+  const handleRunOnHardware = useCallback(async (apiKey: string) => {
+    if (jobStatus !== 'idle' && jobStatus !== 'completed' && jobStatus !== 'error') return;
     
-    setIsHardwareRunning(true);
+    // 1. Reset state and switch to visualization tab
+    setJobStatus('submitted');
+    setJobId(null);
     setHardwareResult(null);
     setActiveTab('visualization');
 
-    // Simulate network delay and job queue time
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    // 2. Simulate API call to submit job
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    const newJobId = `mqs-job-${Date.now()}`;
+    setJobId(newJobId);
+    setJobStatus('queued');
+    
+    // 3. Simulate job queueing
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    setJobStatus('running');
 
-    // Use the existing simulator with a hardcoded, realistic noise model
+    // 4. Simulate job execution
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // 5. "Fetch" results by running the local noisy simulator
     const hardwareNoiseModel = {
         depolarizing: 0.01, // 1% depolarizing error
         phaseDamping: 0.02, // 2% phase damping
@@ -542,8 +555,11 @@ export const App: React.FC = () => {
     const result = simulate(placedItems, numQubits, customGateDefinitions, hardwareNoiseModel);
     
     setHardwareResult(result);
-    setIsHardwareRunning(false);
-  }, [placedItems, numQubits, customGateDefinitions, isHardwareRunning]);
+    setJobStatus('completed');
+
+  }, [placedItems, numQubits, customGateDefinitions, jobStatus]);
+
+  const isHardwareRunning = jobStatus !== 'idle' && jobStatus !== 'completed' && jobStatus !== 'error';
 
   return (
     <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => setSelectedItemIds([])}>
@@ -614,6 +630,8 @@ export const App: React.FC = () => {
             hardwareResult={hardwareResult}
             isHardwareRunning={isHardwareRunning}
             onRunOnHardware={handleRunOnHardware}
+            jobId={jobId}
+            jobStatus={jobStatus}
           />
         </main>
       </div>
