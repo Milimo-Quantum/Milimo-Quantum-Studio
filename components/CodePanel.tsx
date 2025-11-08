@@ -30,8 +30,8 @@ const CodePanel: React.FC<CodePanelProps> = ({ placedItems, customGateDefs, numQ
     return {};
   }, [codeType, depolarizingError, phaseDampingError]);
   
-  const rawCode = useMemo(() => generateQiskitCode(placedItems, customGateDefs, numQubits, codeGenOptions).replace(/<span.*?>|<\/span>/g, ''), [placedItems, customGateDefs, numQubits, codeGenOptions]);
-  const highlightedCode = useMemo(() => generateQiskitCode(placedItems, customGateDefs, numQubits, codeGenOptions), [placedItems, customGateDefs, numQubits, codeGenOptions]);
+  const rawCode = useMemo(() => generateQiskitCode(placedItems, customGateDefs, numQubits, { ...codeGenOptions, highlight: false }), [placedItems, customGateDefs, numQubits, codeGenOptions]);
+  const highlightedCode = useMemo(() => generateQiskitCode(placedItems, customGateDefs, numQubits, { ...codeGenOptions, highlight: true }), [placedItems, customGateDefs, numQubits, codeGenOptions]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(rawCode);

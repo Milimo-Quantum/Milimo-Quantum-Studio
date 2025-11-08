@@ -501,8 +501,13 @@ export const generateQiskitCode = (
     placedItems: PlacedItem[], 
     customGateDefs: CustomGateDefinition[], 
     numQubits: number,
-    options: { noiseModel?: { depolarizing: number, phaseDamping: number } } = {}
+    options: { 
+        noiseModel?: { depolarizing: number, phaseDamping: number },
+        highlight?: boolean 
+    } = {}
 ): string => {
+    const { noiseModel, highlight = true } = options;
+
     const unrolledGates = unrollCircuit(placedItems, customGateDefs);
     const sortedGates = unrolledGates.sort((a, b) => a.left - b.left);
 
@@ -525,7 +530,7 @@ export const generateQiskitCode = (
     }
     
     // Add noise model and simulation run if requested
-    if (options.noiseModel && (options.noiseModel.depolarizing > 0 || options.noiseModel.phaseDamping > 0)) {
+    if (noiseModel && (noiseModel.depolarizing > 0 || noiseModel.phaseDamping > 0)) {
         imports += `from qiskit_aer import AerSimulator\n`;
         imports += `from qiskit.providers.aer.noise import depolarizing_error, phase_damping_error, NoiseModel\n`;
 
@@ -533,15 +538,15 @@ export const generateQiskitCode = (
         code += `# Create an empty noise model\n`;
         code += `noise_model = NoiseModel()\n\n`;
 
-        if (options.noiseModel.depolarizing > 0) {
+        if (noiseModel.depolarizing > 0) {
             code += `# Add depolarizing error to all single-qubit gates\n`;
-            code += `p_depolarizing = ${options.noiseModel.depolarizing.toFixed(4)}\n`;
+            code += `p_depolarizing = ${noiseModel.depolarizing.toFixed(4)}\n`;
             code += `error_1 = depolarizing_error(p_depolarizing, 1)\n`;
             code += `noise_model.add_all_qubit_quantum_error(error_1, ['h', 'x', 'y', 'z', 's', 'sdg', 't', 'tdg'])\n\n`;
         }
-        if (options.noiseModel.phaseDamping > 0) {
+        if (noiseModel.phaseDamping > 0) {
             code += `# Add phase damping error to all two-qubit gates\n`;
-            code += `p_phase_damping = ${options.noiseModel.phaseDamping.toFixed(4)}\n`;
+            code += `p_phase_damping = ${noiseModel.phaseDamping.toFixed(4)}\n`;
             code += `error_2 = phase_damping_error(p_phase_damping).tensor(phase_damping_error(p_phase_damping))\n`;
             code += `noise_model.add_all_qubit_quantum_error(error_2, ['cx', 'cz', 'swap'])\n\n`;
         }
@@ -567,5 +572,6 @@ export const generateQiskitCode = (
         code += `print(f"Counts: {counts}")\n`;
     }
 
-    return highlightCode(imports + '\n' + code);
+    const fullCode = imports + '\n' + code;
+    return highlight ? highlightCode(fullCode) : fullCode;
 };

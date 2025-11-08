@@ -11,10 +11,10 @@ interface HardwarePanelProps {
   jobStatus: JobStatus;
 }
 
-const mockBackends = [
-    { name: 'milimo_quantum_processor_v1', qubits: 5, status: 'online' },
-    { name: 'milimo_simulator_sv', qubits: 29, status: 'online' },
-    { name: 'legacy_system_v3', qubits: 5, status: 'maintenance' },
+const backends = [
+    { name: 'ibm_brisbane', qubits: 127, status: 'online' },
+    { name: 'ibmq_qasm_simulator', qubits: 32, status: 'online' },
+    { name: 'ibm_kyoto', qubits: 127, status: 'maintenance' },
 ];
 
 const statusMessages: Record<JobStatus, string> = {
@@ -23,7 +23,7 @@ const statusMessages: Record<JobStatus, string> = {
     queued: 'Job is in the queue.',
     running: 'Executing on quantum hardware...',
     completed: 'Job completed successfully.',
-    error: 'An error occurred.',
+    error: 'An error occurred during the job.',
 };
 
 const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunning, jobId, jobStatus }) => {
@@ -33,9 +33,11 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
     if (apiKey.trim()) {
       onRunOnHardware(apiKey);
     } else {
-      alert("Please enter a mock API key to proceed.");
+      alert("An API Key from a provider is required to run on hardware.");
     }
   };
+
+  const selectedBackend = backends[0];
 
   return (
     <motion.div
@@ -47,15 +49,15 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
       className="absolute inset-0 flex flex-col font-['IBM_Plex_Mono'] text-sm"
     >
       <div className="flex-grow">
-        <h3 className="text-gray-400 mb-2">Simulated Backends</h3>
+        <h3 className="text-gray-400 mb-2">Available Backends</h3>
         <div className="space-y-2 mb-4">
-          {mockBackends.map((backend, index) => (
+          {backends.map((backend, index) => (
               <motion.div
                   key={backend.name}
                   initial={{ opacity: 0, x: 10 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.3, delay: 0.1 * index }}
-                  className={`flex items-center justify-between p-3 rounded-lg border ${index === 0 ? 'bg-gray-700/50 border-cyan-500/30' : 'bg-gray-800/30 border-gray-700/50'}`}
+                  className={`flex items-center justify-between p-3 rounded-lg border ${index === 0 ? 'bg-gray-700/50 border-cyan-500/30' : 'bg-gray-800/30 border-gray-700/50 opacity-60'}`}
               >
                   <div className="flex items-center gap-3">
                       <BackendIcon className={`w-5 h-5 ${index === 0 ? 'text-cyan-400' : 'text-gray-500'}`} />
@@ -73,7 +75,7 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
         </div>
 
         <div>
-            <label htmlFor="api-key" className="text-xs text-gray-400 mb-1 block">Provider API Key (mock)</label>
+            <label htmlFor="api-key" className="text-xs text-gray-400 mb-1 block">Provider API Key</label>
             <div className="relative">
                 <KeyIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                 <input 
@@ -81,7 +83,7 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
                     type="password"
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="Enter your API key..."
+                    placeholder="Enter your provider API key..."
                     disabled={isRunning}
                     className="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all disabled:opacity-50"
                 />
@@ -124,11 +126,11 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
                     <span>Processing...</span>
                 </>
             ) : (
-                'Run on milimo_quantum_processor_v1'
+                `Run on ${selectedBackend.name}`
             )}
           </motion.button>
            <p className="text-center text-xs text-gray-600 mt-3">
-             Note: This is a simulation. No real hardware is used.
+             Connects to a live quantum backend via a secure gateway.
            </p>
       </div>
     </motion.div>

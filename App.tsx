@@ -6,7 +6,7 @@ import RightPanel from './components/RightPanel';
 import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
-import { getAgentResponse, getTutorResponse } from './services/geminiService';
+import { getAgentResponse, getTutorResponse, generateQiskitCode } from './services/geminiService';
 import { simulate } from './services/quantumSimulator';
 import { gateMap } from './data/gates';
 import { useHistory } from './hooks/useHistory';
@@ -37,6 +37,26 @@ const decodeCircuit = (encoded: string): CircuitState | null => {
     console.error("Failed to decode circuit", e);
     return null;
   }
+};
+
+const countsToSimulationResult = (counts: { [state: string]: number }, numQubits: number): SimulationResult => {
+    const totalShots = Object.values(counts).reduce((sum, val) => sum + val, 0);
+    if (totalShots === 0) {
+        return { probabilities: [], qubitStates: [], trace: 0 };
+    }
+
+    const probabilities = Object.entries(counts).map(([state, count]) => ({
+        state: `|${state.padStart(numQubits, '0')}⟩`,
+        value: count / totalShots,
+    }));
+    
+    // We cannot determine Bloch sphere coordinates from measurement counts
+    const qubitStates = Array.from({ length: numQubits }, () => ({
+        blochSphereCoords: { x: 0, y: 0, z: 0 },
+        purity: 0, // Purity is unknown from hardware results
+    }));
+
+    return { probabilities, qubitStates, trace: 1.0 }; // Trace is assumed to be 1 for counts
 };
 
 
@@ -78,6 +98,7 @@ export const App: React.FC = () => {
   const [hardwareResult, setHardwareResult] = useState<SimulationResult | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus>('idle');
+  const pollingIntervalRef = useRef<number | null>(null);
 
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -525,41 +546,140 @@ export const App: React.FC = () => {
 
   }, [placedItems, selectedItemIds, state, customGateDefinitions, setState]);
 
-  const handleRunOnHardware = useCallback(async (apiKey: string) => {
-    if (jobStatus !== 'idle' && jobStatus !== 'completed' && jobStatus !== 'error') return;
+  // --- Asynchronous Hardware Job Submission ---
+  const handleRunOnHardware = useCallback(async (apiKey: string, backendName: string) => {
+    // FIX: Refactored the condition to be more explicit and avoid potential linter errors.
+    if (jobStatus === 'submitted' || jobStatus === 'queued' || jobStatus === 'running') return;
     
-    // 1. Reset state and switch to visualization tab
     setJobStatus('submitted');
     setJobId(null);
     setHardwareResult(null);
     setActiveTab('visualization');
 
-    // 2. Simulate API call to submit job
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    const newJobId = `mqs-job-${Date.now()}`;
-    setJobId(newJobId);
-    setJobStatus('queued');
-    
-    // 3. Simulate job queueing
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    setJobStatus('running');
+    try {
+        const rawCode = generateQiskitCode(placedItems, customGateDefinitions, numQubits, { highlight: false });
+        
+        // In a real application, you would uncomment the following block to call your backend.
+        /*
+        const response = await fetch('/api/submit-job', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                qiskitCode: rawCode,
+                apiToken: apiKey,
+                backendName: backendName,
+            }),
+        });
 
-    // 4. Simulate job execution
-    await new Promise(resolve => setTimeout(resolve, 5000));
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.statusText}`);
+        }
+        const { jobId: newJobId } = await response.json();
+        */
 
-    // 5. "Fetch" results by running the local noisy simulator
-    const hardwareNoiseModel = {
-        depolarizing: 0.01, // 1% depolarizing error
-        phaseDamping: 0.02, // 2% phase damping
+        // --- SIMULATION FOR DEMO ---
+        // Since the backend is not implemented, we'll simulate a successful submission.
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const newJobId = `mqs-job-${Date.now()}`;
+        // --- END SIMULATION ---
+
+        setJobId(newJobId);
+        setJobStatus('queued'); // This kicks off the polling useEffect
+
+    } catch (error) {
+        console.error("Failed to submit job:", error);
+        setJobStatus('error');
+    }
+  }, [jobStatus, placedItems, customGateDefinitions, numQubits]);
+
+
+  // --- Asynchronous Hardware Job Polling & Result Fetching ---
+  useEffect(() => {
+    const clearPolling = () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
     };
-    const result = simulate(placedItems, numQubits, customGateDefinitions, hardwareNoiseModel);
     
-    setHardwareResult(result);
-    setJobStatus('completed');
+    const fetchJobResult = async (id: string) => {
+      try {
+        // In a real application, you would uncomment the following block.
+        /*
+        const response = await fetch(`/api/job-result/${id}`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        const data = await response.json();
+        const result = countsToSimulationResult(data.counts, numQubits);
+        */
+        
+        // --- SIMULATION FOR DEMO ---
+        // Since the backend is not implemented, we'll simulate a noisy result.
+        const hardwareNoiseModel = { depolarizing: 0.01, phaseDamping: 0.02 };
+        const simResult = simulate(placedItems, numQubits, customGateDefinitions, hardwareNoiseModel);
+        const shots = 1024;
+        const counts = simResult.probabilities.reduce((acc, p) => {
+            const state = p.state.replace(/[|⟩]/g, '');
+            acc[state] = Math.round(p.value * shots);
+            return acc;
+        }, {} as {[key: string]: number});
+        const result = countsToSimulationResult(counts, numQubits);
+        // --- END SIMULATION ---
+        
+        setHardwareResult(result);
+      } catch (error) {
+        console.error('Error fetching job result:', error);
+        setJobStatus('error');
+      }
+    };
 
-  }, [placedItems, numQubits, customGateDefinitions, jobStatus]);
+    if (!jobId || jobStatus === 'idle' || jobStatus === 'completed' || jobStatus === 'error') {
+      clearPolling();
+      return;
+    }
 
-  const isHardwareRunning = jobStatus !== 'idle' && jobStatus !== 'completed' && jobStatus !== 'error';
+    if (!pollingIntervalRef.current) {
+      pollingIntervalRef.current = window.setInterval(async () => {
+        let serverStatus: JobStatus = 'idle';
+        try {
+            // In a real application, you would uncomment this block to poll your backend.
+            /*
+            const response = await fetch(`/api/job-status/${jobId}`);
+            if (!response.ok) throw new Error('Status check failed');
+            const { status } = await response.json();
+            serverStatus = status as JobStatus;
+            setJobStatus(serverStatus);
+            */
+            
+            // --- SIMULATION FOR DEMO ---
+            // This simulates the backend returning a new status on each poll.
+            setJobStatus(currentStatus => {
+                if (currentStatus === 'queued') serverStatus = 'running';
+                else if (currentStatus === 'running') serverStatus = 'completed';
+                else serverStatus = currentStatus;
+                return serverStatus;
+            });
+            // --- END SIMULATION ---
+
+            if (serverStatus === 'completed' || serverStatus === 'error') {
+              clearPolling();
+              if (serverStatus === 'completed') {
+                await fetchJobResult(jobId);
+              }
+            }
+
+        } catch (error) {
+            console.error('Error polling job status:', error);
+            setJobStatus('error');
+            clearPolling();
+        }
+      }, 4000);
+    }
+
+    return clearPolling;
+  }, [jobId, jobStatus, placedItems, numQubits, customGateDefinitions]);
+
+
+  const isHardwareRunning = jobStatus === 'submitted' || jobStatus === 'queued' || jobStatus === 'running';
 
   return (
     <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => setSelectedItemIds([])}>
@@ -629,7 +749,7 @@ export const App: React.FC = () => {
             setPhaseDampingError={setPhaseDampingError}
             hardwareResult={hardwareResult}
             isHardwareRunning={isHardwareRunning}
-            onRunOnHardware={handleRunOnHardware}
+            onRunOnHardware={(apiKey) => handleRunOnHardware(apiKey, 'ibm_brisbane')}
             jobId={jobId}
             jobStatus={jobStatus}
           />
