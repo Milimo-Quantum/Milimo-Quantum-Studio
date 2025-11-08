@@ -176,16 +176,20 @@ ${circuitDescription}
 
 const explanationAgentSystemInstruction = `You are the Explanation Agent for Milimo AI. Your job is to provide a final, user-facing response that synthesizes the entire problem-solving journey using a strict analytical process.
 
-**Your Input:** A JSON object containing the user's request, research, critic reasoning, and a definitive snapshot of the final circuit state.
+**Your Input:** A JSON object containing the user's request, research, critic reasoning, the final circuit state, and potentially hardware simulation results.
 
 **Core Directives & Process:**
 1.  **Step 1: Step-by-Step Analysis (Internal Monologue):** First, you MUST perform a step-by-step analysis of the gates in the provided \`final_canvas_state\`. Describe the effect of each gate in sequence on the qubits.
 2.  **Step 2: Identify Purpose & Gaps (Internal Monologue):** Based ONLY on your analysis from Step 1, you must then explicitly state the circuit's purpose. If the circuit is an incomplete version of a known algorithm, you MUST state what is missing. For example: *'This circuit creates redundancy by copying the state of q0 to q1 and q2. It is the core of a bit-flip encoding circuit but is missing the initial Hadamard gate required to encode a superposition state.'*
-3.  **Step 3: Synthesize Final Response (User-Facing Output):** Finally, combine your rigorous analysis with the user's intent and the critic's reasoning to generate the user-facing text.
+3.  **Step 3: Hardware Comparison (Internal Monologue, if applicable):** If the input contains \`hardware_simulation_results\`, you MUST compare them to the \`ideal_simulation_results\`.
+    - Note the differences in measurement probabilities (e.g., "The ideal result for state |11⟩ is 50%, but the hardware result is only 45.2%").
+    - State that this difference is expected and is caused by quantum noise on the simulated hardware, which leads to errors and decoherence.
+4.  **Step 4: Synthesize Final Response (User-Facing Output):** Finally, combine your rigorous analysis with the user's intent and the critic's reasoning to generate the user-facing text.
     - Your description of the circuit on the canvas MUST be based *exclusively* on your analysis of the provided \`final_canvas_state\` object. DO NOT HALLUCINATE GATES that aren't there.
     - Explain WHAT was built on the canvas, being precise and accurate.
     - Explain WHY it was built, referencing the user's intent and the critic's decision-making process.
-    - If the request was to analyze an existing circuit, your entire response is the analysis from steps 1 & 2.
+    - If your analysis included a hardware comparison (Step 3), you MUST include a section in your final response explaining the impact of noise.
+    - If the request was to analyze an existing circuit, your entire response is the analysis from steps 1, 2, and 3.
     - Format your response for clarity using Markdown (bolding, lists, etc.).`;
 
 // The main function that orchestrates the agent workflow.
@@ -194,6 +198,7 @@ export const getAgentResponse = async (
   currentCircuit: PlacedGate[],
   simulationResult: SimulationResult | null,
   numQubits: number,
+  hardwareResult: SimulationResult | null,
   onStatusUpdate: (update: AgentStatusUpdate) => void
 ): Promise<AIResponse> => {
     
@@ -421,11 +426,15 @@ export const getAgentResponse = async (
 
     // Explanation Agent
     onStatusUpdate({ agent: 'Explanation', status: 'running', message: 'Synthesizing final response...' });
-    const explanationContext = `Synthesize the following information into a single, cohesive, user-facing response.
-    - User's original prompt: "${executionContext.userPrompt}"
-    - Research findings: "${executionContext.researchFindings}"
-    - Critic's reasoning for approval: "${executionContext.criticReasoning}"
-    - Final Canvas State: ${JSON.stringify(finalCanvasState)}`;
+    const explanationContextObject = {
+        user_prompt: executionContext.userPrompt,
+        research_findings: executionContext.researchFindings,
+        critic_reasoning: executionContext.criticReasoning,
+        final_canvas_state: finalCanvasState,
+        ideal_simulation_results: simulationResult,
+        hardware_simulation_results: hardwareResult,
+    };
+    const explanationContext = `Synthesize the following information into a single, cohesive, user-facing response.\n\n${JSON.stringify(explanationContextObject, null, 2)}`;
 
     const explanationResponse = await ai.models.generateContent({
         model,

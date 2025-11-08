@@ -3,17 +3,17 @@ import { motion, AnimatePresence } from 'framer-motion';
 import CopilotChat from './CopilotChat';
 import VisualizationPanel from './VisualizationPanel';
 import CodePanel from './CodePanel';
-import type { Message, SimulationResult, PlacedItem, CustomGateDefinition } from '../types';
-
-type Tab = 'copilot' | 'visualization' | 'code';
+import HardwarePanel from './HardwarePanel';
+import type { Message, SimulationResult, PlacedItem, CustomGateDefinition, RightPanelTab } from '../types';
+import ChipIcon from './icons/ChipIcon';
 
 interface RightPanelProps {
   messages: Message[];
   isLoading: boolean;
   onSend: (prompt: string) => void;
   simulationResult: SimulationResult | null;
-  activeTab: Tab;
-  setActiveTab: (tab: Tab) => void;
+  activeTab: RightPanelTab;
+  setActiveTab: (tab: RightPanelTab) => void;
   placedItems: PlacedItem[];
   customGateDefs: CustomGateDefinition[];
   visualizedQubit: number;
@@ -22,6 +22,9 @@ interface RightPanelProps {
   setDepolarizingError: (value: number) => void;
   phaseDampingError: number;
   setPhaseDampingError: (value: number) => void;
+  hardwareResult: SimulationResult | null;
+  isHardwareRunning: boolean;
+  onRunOnHardware: () => void;
 }
 
 const RightPanel: React.FC<RightPanelProps> = (props) => {
@@ -37,12 +40,16 @@ const RightPanel: React.FC<RightPanelProps> = (props) => {
     setDepolarizingError,
     phaseDampingError,
     setPhaseDampingError,
+    hardwareResult,
+    isHardwareRunning,
+    onRunOnHardware
   } = props;
 
-  const tabs: { id: Tab, label: string }[] = [
+  const tabs: { id: RightPanelTab, label: string }[] = [
     { id: 'copilot', label: 'Milimo AI' },
     { id: 'visualization', label: 'Visualization' },
     { id: 'code', label: 'Code' },
+    { id: 'hardware', label: 'Hardware' },
   ];
 
   return (
@@ -59,8 +66,9 @@ const RightPanel: React.FC<RightPanelProps> = (props) => {
             onClick={() => setActiveTab(tab.id)}
             className={`${
               activeTab === tab.id ? 'text-cyan-400' : 'text-gray-400 hover:text-white'
-            } relative flex-1 text-sm font-medium py-2 transition-colors`}
+            } relative flex-1 text-sm font-medium py-2 transition-colors flex items-center justify-center gap-1.5`}
           >
+            {tab.id === 'hardware' && <ChipIcon className="w-4 h-4" />}
             {tab.label}
             {activeTab === tab.id && (
               <motion.div
@@ -83,8 +91,11 @@ const RightPanel: React.FC<RightPanelProps> = (props) => {
             setDepolarizingError={setDepolarizingError}
             phaseDampingError={phaseDampingError}
             setPhaseDampingError={setPhaseDampingError}
+            hardwareResult={hardwareResult}
+            isHardwareRunning={isHardwareRunning}
           />}
           {activeTab === 'code' && <CodePanel placedItems={placedItems} customGateDefs={customGateDefs} numQubits={numQubits} />}
+          {activeTab === 'hardware' && <HardwarePanel onRunOnHardware={onRunOnHardware} isRunning={isHardwareRunning} />}
         </AnimatePresence>
       </div>
     </motion.aside>

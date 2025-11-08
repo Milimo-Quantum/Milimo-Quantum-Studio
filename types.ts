@@ -94,6 +94,7 @@ export interface AgentStatusMessage {
 }
 
 export type Message = TextMessage | AgentStatusMessage;
+export type RightPanelTab = 'copilot' | 'visualization' | 'code' | 'hardware';
 
 // Simulation Types
 export interface ComplexNumber {

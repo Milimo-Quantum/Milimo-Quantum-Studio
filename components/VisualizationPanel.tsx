@@ -152,6 +152,25 @@ const NoiseSlider: React.FC<{
     </div>
 );
 
+const ProbabilityBars: React.FC<{ probabilities: SimulationResult['probabilities'] }> = ({ probabilities }) => (
+    <div className="space-y-2">
+        {probabilities.map(p => (
+            <div key={p.state} className="flex items-center gap-3">
+                <span className="w-20 text-right text-gray-500">{p.state}</span>
+                <div className="flex-grow bg-gray-700/50 rounded-full h-4 overflow-hidden">
+                    <motion.div
+                        className="bg-gradient-to-r from-cyan-500 to-blue-500 h-full"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${p.value * 100}%` }}
+                        transition={{ duration: 0.5, ease: 'easeOut' }}
+                    />
+                </div>
+                <span className="w-12 text-left">{`${(p.value * 100).toFixed(1)}%`}</span>
+            </div>
+        ))}
+    </div>
+);
+
 
 interface VisualizationPanelProps {
   result: SimulationResult | null;
@@ -161,9 +180,11 @@ interface VisualizationPanelProps {
   setDepolarizingError: (value: number) => void;
   phaseDampingError: number;
   setPhaseDampingError: (value: number) => void;
+  hardwareResult: SimulationResult | null;
+  isHardwareRunning: boolean;
 }
 
-const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visualizedQubit, depolarizingError, setDepolarizingError, phaseDampingError, setPhaseDampingError }) => {
+const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visualizedQubit, depolarizingError, setDepolarizingError, phaseDampingError, setPhaseDampingError, hardwareResult, isHardwareRunning }) => {
   const [isNoisePanelOpen, setIsNoisePanelOpen] = useState(false);
   const hasResult = result && result.probabilities.length > 0;
 
@@ -202,7 +223,7 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
                  <button onClick={() => setIsNoisePanelOpen(p => !p)} className="w-full flex justify-between items-center text-gray-400 mb-3">
                     <div className="flex items-center gap-2">
                         <NoiseIcon className="w-4 h-4" />
-                        Noise Models
+                        Noise Models (for Ideal Simulation)
                     </div>
                      <svg className={`w-4 h-4 transition-transform ${isNoisePanelOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                  </button>
@@ -235,21 +256,34 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
 
              <div>
                 <h3 className="text-gray-400 mb-3">Measurement Probabilities</h3>
-                <div className="space-y-2">
-                {result.probabilities.map(p => (
-                    <div key={p.state} className="flex items-center gap-3">
-                    <span className="w-20 text-right text-gray-500">{p.state}</span>
-                    <div className="flex-grow bg-gray-700/50 rounded-full h-4 overflow-hidden">
+                <div className="border border-gray-500/20 rounded-lg p-4">
+                    <h4 className="text-xs text-cyan-300 mb-3">Ideal Simulation</h4>
+                    <ProbabilityBars probabilities={result.probabilities} />
+
+                    <AnimatePresence>
+                    {(isHardwareRunning || hardwareResult) && (
                         <motion.div
-                        className="bg-gradient-to-r from-cyan-500 to-blue-500 h-full"
-                        initial={{ width: 0 }}
-                        animate={{ width: `${p.value * 100}%` }}
-                        transition={{ duration: 0.5, ease: 'easeOut' }}
-                        />
-                    </div>
-                    <span className="w-12 text-left">{`${(p.value * 100).toFixed(1)}%`}</span>
-                    </div>
-                ))}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="mt-4"
+                        >
+                            <div className="h-px bg-gray-700/50 my-4"></div>
+                            <h4 className="text-xs text-purple-300 mb-3">Hardware Run Results</h4>
+                            {isHardwareRunning && !hardwareResult && (
+                                <div className="flex items-center justify-center h-24 text-gray-500">
+                                    <div className="flex gap-1.5 items-center">
+                                        <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.3s]"></span>
+                                        <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.15s]"></span>
+                                        <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse"></span>
+                                        <span className="ml-2">Running on noisy backend...</span>
+                                    </div>
+                                </div>
+                            )}
+                            {hardwareResult && <ProbabilityBars probabilities={hardwareResult.probabilities} />}
+                        </motion.div>
+                    )}
+                    </AnimatePresence>
                 </div>
             </div>
         </>

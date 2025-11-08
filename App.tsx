@@ -3,7 +3,7 @@ import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import CircuitCanvas from './components/CircuitCanvas';
 import RightPanel from './components/RightPanel';
-import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition } from './types';
+import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
 import { getAgentResponse, getTutorResponse } from './services/geminiService';
@@ -55,7 +55,7 @@ export const App: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [draggingComponent, setDraggingComponent] = useState<{component: QuantumGate | CustomGateDefinition, point: {x: number, y: number}} | null>(null);
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
-  const [activeTab, setActiveTab] = useState<'copilot' | 'visualization' | 'code'>('copilot');
+  const [activeTab, setActiveTab] = useState<RightPanelTab>('copilot');
   const [visualizedQubit, setVisualizedQubit] = useState<number>(0);
   const [simulationStep, setSimulationStep] = useState<number | null>(null);
   
@@ -73,6 +73,11 @@ export const App: React.FC = () => {
   // --- Noise Model State ---
   const [depolarizingError, setDepolarizingError] = useState(0);
   const [phaseDampingError, setPhaseDampingError] = useState(0);
+  
+  // --- Hardware Run State ---
+  const [hardwareResult, setHardwareResult] = useState<SimulationResult | null>(null);
+  const [isHardwareRunning, setIsHardwareRunning] = useState(false);
+
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragInfoRef = useRef<{ component: QuantumGate | CustomGateDefinition | null }>({ component: null });
@@ -298,7 +303,7 @@ export const App: React.FC = () => {
     };
     
     try {
-      const aiResponse = await getAgentResponse(allMessages, placedGates, simulationResult, numQubits, onStatusUpdate);
+      const aiResponse = await getAgentResponse(allMessages, placedGates, simulationResult, numQubits, hardwareResult, onStatusUpdate);
       if (aiResponse.actions.length > 0) {
         executeActions(aiResponse.actions);
       }
@@ -323,10 +328,10 @@ export const App: React.FC = () => {
     } finally {
       setIsAiLoading(false);
     }
-  }, [isAiLoading, placedItems, messages, executeActions, simulationResult, numQubits]);
+  }, [isAiLoading, placedItems, messages, executeActions, simulationResult, numQubits, hardwareResult]);
 
   const handleAnalyzeCircuit = useCallback(() => {
-    handleSend("Analyze my current circuit. Identify its purpose if it's a known algorithm or state, explain the principles behind it, and propose potential next steps or interesting modifications.");
+    handleSend("Analyze my current circuit. Identify its purpose if it's a known algorithm or state, explain the principles behind it, and propose potential next steps or interesting modifications. If there are hardware results available, compare them to the ideal simulation and explain any differences.");
   }, [handleSend]);
   
   const handleDebugCircuit = useCallback(() => {
@@ -519,6 +524,27 @@ export const App: React.FC = () => {
 
   }, [placedItems, selectedItemIds, state, customGateDefinitions, setState]);
 
+  const handleRunOnHardware = useCallback(async () => {
+    if (isHardwareRunning) return;
+    
+    setIsHardwareRunning(true);
+    setHardwareResult(null);
+    setActiveTab('visualization');
+
+    // Simulate network delay and job queue time
+    await new Promise(resolve => setTimeout(resolve, 2500));
+
+    // Use the existing simulator with a hardcoded, realistic noise model
+    const hardwareNoiseModel = {
+        depolarizing: 0.01, // 1% depolarizing error
+        phaseDamping: 0.02, // 2% phase damping
+    };
+    const result = simulate(placedItems, numQubits, customGateDefinitions, hardwareNoiseModel);
+    
+    setHardwareResult(result);
+    setIsHardwareRunning(false);
+  }, [placedItems, numQubits, customGateDefinitions, isHardwareRunning]);
+
   return (
     <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => setSelectedItemIds([])}>
       <div className="absolute inset-0 z-0 opacity-20">
@@ -585,6 +611,9 @@ export const App: React.FC = () => {
             setDepolarizingError={setDepolarizingError}
             phaseDampingError={phaseDampingError}
             setPhaseDampingError={setPhaseDampingError}
+            hardwareResult={hardwareResult}
+            isHardwareRunning={isHardwareRunning}
+            onRunOnHardware={handleRunOnHardware}
           />
         </main>
       </div>
