@@ -98,7 +98,13 @@ const RightPanel: React.FC<RightPanelProps> = (props) => {
             hardwareResult={hardwareResult}
             isHardwareRunning={isHardwareRunning}
           />}
-          {activeTab === 'code' && <CodePanel placedItems={placedItems} customGateDefs={customGateDefs} numQubits={numQubits} />}
+          {activeTab === 'code' && <CodePanel 
+            placedItems={placedItems} 
+            customGateDefs={customGateDefs} 
+            numQubits={numQubits}
+            depolarizingError={depolarizingError}
+            phaseDampingError={phaseDampingError}
+          />}
           {activeTab === 'hardware' && <HardwarePanel 
             onRunOnHardware={onRunOnHardware} 
             isRunning={isHardwareRunning} 

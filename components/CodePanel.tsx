@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { PlacedItem, CustomGateDefinition } from '../types';
 import { generateQiskitCode } from '../services/geminiService';
 import LogoIcon from './icons/LogoIcon';
@@ -9,13 +9,29 @@ interface CodePanelProps {
   placedItems: PlacedItem[];
   customGateDefs: CustomGateDefinition[];
   numQubits: number;
+  depolarizingError: number;
+  phaseDampingError: number;
 }
+type CodeType = 'ideal' | 'noisy';
 
-const CodePanel: React.FC<CodePanelProps> = ({ placedItems, customGateDefs, numQubits }) => {
+const CodePanel: React.FC<CodePanelProps> = ({ placedItems, customGateDefs, numQubits, depolarizingError, phaseDampingError }) => {
   const [hasCopied, setHasCopied] = useState(false);
+  const [codeType, setCodeType] = useState<CodeType>('ideal');
+
+  const codeGenOptions = useMemo(() => {
+    if (codeType === 'noisy' && (depolarizingError > 0 || phaseDampingError > 0)) {
+        return { 
+            noiseModel: {
+                depolarizing: depolarizingError,
+                phaseDamping: phaseDampingError,
+            }
+        };
+    }
+    return {};
+  }, [codeType, depolarizingError, phaseDampingError]);
   
-  const rawCode = useMemo(() => generateQiskitCode(placedItems, customGateDefs, numQubits).replace(/<span.*?>|<\/span>/g, ''), [placedItems, customGateDefs, numQubits]);
-  const highlightedCode = useMemo(() => generateQiskitCode(placedItems, customGateDefs, numQubits), [placedItems, customGateDefs, numQubits]);
+  const rawCode = useMemo(() => generateQiskitCode(placedItems, customGateDefs, numQubits, codeGenOptions).replace(/<span.*?>|<\/span>/g, ''), [placedItems, customGateDefs, numQubits, codeGenOptions]);
+  const highlightedCode = useMemo(() => generateQiskitCode(placedItems, customGateDefs, numQubits, codeGenOptions), [placedItems, customGateDefs, numQubits, codeGenOptions]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(rawCode);
@@ -34,7 +50,20 @@ const CodePanel: React.FC<CodePanelProps> = ({ placedItems, customGateDefs, numQ
       className="absolute inset-0 flex flex-col font-['IBM_Plex_Mono']"
     >
       <div className="flex justify-between items-center p-1 text-xs text-gray-400 border-b border-gray-500/20 mb-2">
-        <span>Qiskit (Python)</span>
+        <div className="flex items-center gap-1 bg-gray-800/50 p-0.5 rounded-md">
+            <button 
+                onClick={() => setCodeType('ideal')}
+                className={`px-2 py-0.5 rounded ${codeType === 'ideal' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
+            >
+                Ideal Simulation
+            </button>
+             <button 
+                onClick={() => setCodeType('noisy')}
+                className={`px-2 py-0.5 rounded ${codeType === 'noisy' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
+             >
+                Noisy Simulation
+            </button>
+        </div>
         {placedItems.length > 0 && (
           <button 
             onClick={handleCopy}

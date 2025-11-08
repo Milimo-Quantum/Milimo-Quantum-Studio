@@ -487,27 +487,85 @@ export const getTutorResponse = async (
 const qiskitMethodMap: Record<string, (g: PlacedGate) => string | null> = { 'h': g => `qc.h(${g.qubit})`, 'x': g => `qc.x(${g.qubit})`, 'y': g => `qc.y(${g.qubit})`, 'z': g => `qc.z(${g.qubit})`, 's': g => `qc.s(${g.qubit})`, 'sdg': g => `qc.sdg(${g.qubit})`, 't': g => `qc.t(${g.qubit})`, 'tdg': g => `qc.tdg(${g.qubit})`, 'cnot': g => g.controlQubit !== undefined ? `qc.cx(${g.controlQubit}, ${g.qubit})` : null, 'cz': g => g.controlQubit !== undefined ? `qc.cz(${g.controlQubit}, ${g.qubit})` : null, 'swap': g => g.controlQubit !== undefined ? `qc.swap(${g.qubit}, ${g.controlQubit})` : null, 'measure': g => `qc.measure(${g.qubit}, ${g.qubit})`, };
 const methodNames = Object.keys(qiskitMethodMap).join('|').replace('cnot', 'cx');
 
-export const generateQiskitCode = (placedItems: PlacedItem[], customGateDefs: CustomGateDefinition[], numQubits: number): string => {
+const highlightCode = (code: string): string => {
+    const methodRegex = new RegExp(`(\\.(?:${methodNames}|append|run|get_counts)\\()`, 'g');
+    return code
+        .replace(/(from|import|as|print)/g, '<span class="text-purple-400">$&</span>')
+        .replace(/(QuantumCircuit|NoiseModel|AerSimulator|depolarizing_error|phase_damping_error)/g, '<span class="text-sky-400">$&</span>')
+        .replace(/\b(qc|noise_model|error_1|error_2|simulator|result|counts)\b/g, '<span class="text-yellow-400">$&</span>')
+        .replace(methodRegex, '<span class="text-cyan-400">$&</span>')
+        .replace(/(#.*)/g, '<span class="text-gray-500">$&</span>');
+};
+
+export const generateQiskitCode = (
+    placedItems: PlacedItem[], 
+    customGateDefs: CustomGateDefinition[], 
+    numQubits: number,
+    options: { noiseModel?: { depolarizing: number, phaseDamping: number } } = {}
+): string => {
     const unrolledGates = unrollCircuit(placedItems, customGateDefs);
     const sortedGates = unrolledGates.sort((a, b) => a.left - b.left);
 
-    let code = `from qiskit import QuantumCircuit\n\n`;
-    code += `# Create a quantum circuit with ${numQubits} qubits\n`;
-    code += `qc = QuantumCircuit(${numQubits})\n\n`;
+    let imports = `from qiskit import QuantumCircuit\n`;
+    let code = `# Create a quantum circuit with ${numQubits} qubits and ${numQubits} classical bits\n`;
+    code += `qc = QuantumCircuit(${numQubits}, ${numQubits})\n\n`;
 
     if (sortedGates.length > 0) code += `# Add gates to the circuit\n`;
     for (const gate of sortedGates) {
         const generator = qiskitMethodMap[gate.gateId];
         if (generator) {
             const line = generator(gate);
-            if(line) code += line + '\n';
+            // Qiskit's measure takes (qubit, classical_bit)
+            if (gate.gateId === 'measure') {
+                code += `qc.measure(${gate.qubit}, ${gate.qubit})\n`;
+            } else if(line) {
+                code += line + '\n';
+            }
         }
     }
-    const methodRegex = new RegExp(`(\\.(?:${methodNames})\\()`, 'g');
-    return code
-        .replace(/(from|import|as)/g, '<span class="text-purple-400">$&</span>')
-        .replace(/(QuantumCircuit)/g, '<span class="text-sky-400">$&</span>')
-        .replace(/\b(qc)\b/g, '<span class="text-yellow-400">$&</span>')
-        .replace(methodRegex, '<span class="text-cyan-400">$&</span>')
-        .replace(/(#.*)/g, '<span class="text-gray-500">$&</span>');
+    
+    // Add noise model and simulation run if requested
+    if (options.noiseModel && (options.noiseModel.depolarizing > 0 || options.noiseModel.phaseDamping > 0)) {
+        imports += `from qiskit_aer import AerSimulator\n`;
+        imports += `from qiskit.providers.aer.noise import depolarizing_error, phase_damping_error, NoiseModel\n`;
+
+        code += `\n# --- Noise Model Definition ---\n`;
+        code += `# Create an empty noise model\n`;
+        code += `noise_model = NoiseModel()\n\n`;
+
+        if (options.noiseModel.depolarizing > 0) {
+            code += `# Add depolarizing error to all single-qubit gates\n`;
+            code += `p_depolarizing = ${options.noiseModel.depolarizing.toFixed(4)}\n`;
+            code += `error_1 = depolarizing_error(p_depolarizing, 1)\n`;
+            code += `noise_model.add_all_qubit_quantum_error(error_1, ['h', 'x', 'y', 'z', 's', 'sdg', 't', 'tdg'])\n\n`;
+        }
+        if (options.noiseModel.phaseDamping > 0) {
+            code += `# Add phase damping error to all two-qubit gates\n`;
+            code += `p_phase_damping = ${options.noiseModel.phaseDamping.toFixed(4)}\n`;
+            code += `error_2 = phase_damping_error(p_phase_damping).tensor(phase_damping_error(p_phase_damping))\n`;
+            code += `noise_model.add_all_qubit_quantum_error(error_2, ['cx', 'cz', 'swap'])\n\n`;
+        }
+
+        code += `# --- Simulation Execution ---\n`;
+        code += `# Create a simulator backend with the noise model\n`;
+        code += `simulator = AerSimulator(noise_model=noise_model)\n\n`;
+        code += `# Execute the circuit and get the results\n`;
+        code += `result = simulator.run(qc, shots=1024).result()\n`;
+        code += `counts = result.get_counts(qc)\n`;
+        code += `print("Counts:", counts)\n`;
+
+    } else {
+         // Ideal simulation
+        imports += `from qiskit.primitives import Sampler\n`;
+        code += `\n# --- Simulation Execution ---\n`;
+        code += `# To run the circuit, you can use a simulator\n`;
+        code += `sampler = Sampler()\n`
+        code += `job = sampler.run(qc, shots=1024)\n`
+        code += `result = job.result()\n`
+        code += `dist = result.quasi_dists[0]\n`
+        code += `counts = {k: v*1024 for k, v in dist.items()}\n`
+        code += `print(f"Counts: {counts}")\n`;
+    }
+
+    return highlightCode(imports + '\n' + code);
 };
