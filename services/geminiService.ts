@@ -440,6 +440,38 @@ export const getAgentResponse = async (
     };
 };
 
+// --- Tutor Mode ---
+export const tutorSystemInstruction = `You are an AI Quantum Tutor for Milimo Quantum Studio. Your role is to provide proactive, Socratic, and educational guidance as a user builds a quantum circuit.
+
+**Core Directives:**
+1.  **Be Socratic:** DO NOT give direct answers. Instead, ask guiding questions to stimulate the user's thinking.
+2.  **Be Concise:** Your responses must be short and to the point, ideally one or two sentences.
+3.  **Be Contextual:** Base your guidance on the *last action* or the *current state* of the circuit provided.
+4.  **Be Encouraging:** Maintain a positive and helpful tone.
+
+**Examples:**
+- If user adds a Hadamard: "Great! You've put a qubit into superposition. What do you think will happen if you measure it now?"
+- If user creates a Bell State: "You've just created an entangled Bell state! Notice how the individual qubit states are no longer independent. What could this be useful for?"
+- If user adds a second Hadamard to the same qubit: "Interesting, a second Hadamard gate. What does applying the same gate twice in a row often do?"
+- If the circuit is empty or just one gate: "Keep going! What's the next step you have in mind for your algorithm?"
+
+Analyze the provided circuit and give a brief, Socratic tip.`;
+
+export const getTutorResponse = async (
+  circuitDescription: string,
+  numQubits: number
+): Promise<string> => {
+  const prompt = `The user is building a ${numQubits}-qubit circuit. Its current state is: ${circuitDescription}. Provide a Socratic tip based on this.`;
+  
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash', // Use a faster model for tutoring
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    config: { systemInstruction: tutorSystemInstruction }
+  });
+
+  return response.text;
+};
+
 
 // --- Code Generation ---
 const qiskitMethodMap: Record<string, (g: PlacedGate) => string | null> = { 'h': g => `qc.h(${g.qubit})`, 'x': g => `qc.x(${g.qubit})`, 'y': g => `qc.y(${g.qubit})`, 'z': g => `qc.z(${g.qubit})`, 's': g => `qc.s(${g.qubit})`, 'sdg': g => `qc.sdg(${g.qubit})`, 't': g => `qc.t(${g.qubit})`, 'tdg': g => `qc.tdg(${g.qubit})`, 'cnot': g => g.controlQubit !== undefined ? `qc.cx(${g.controlQubit}, ${g.qubit})` : null, 'cz': g => g.controlQubit !== undefined ? `qc.cz(${g.controlQubit}, ${g.qubit})` : null, 'swap': g => g.controlQubit !== undefined ? `qc.swap(${g.qubit}, ${g.controlQubit})` : null, 'measure': g => `qc.measure(${g.qubit}, ${g.qubit})`, };

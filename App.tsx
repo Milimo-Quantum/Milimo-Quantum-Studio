@@ -6,10 +6,11 @@ import RightPanel from './components/RightPanel';
 import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
-import { getAgentResponse } from './services/geminiService';
+import { getAgentResponse, getTutorResponse } from './services/geminiService';
 import { simulate } from './services/quantumSimulator';
 import { gateMap } from './data/gates';
 import { useHistory } from './hooks/useHistory';
+import TutorNotification from './components/TutorNotification';
 
 const INITIAL_STATE: CircuitState = {
   numQubits: 3,
@@ -63,6 +64,12 @@ export const App: React.FC = () => {
   ]);
   const [isAiLoading, setIsAiLoading] = useState(false);
 
+  // --- Tutor Mode State ---
+  const [isTutorModeActive, setIsTutorModeActive] = useState(false);
+  const [tutorMessage, setTutorMessage] = useState<string | null>(null);
+  const [isTutorLoading, setIsTutorLoading] = useState(false);
+  const tutorTimerRef = useRef<number | null>(null);
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragInfoRef = useRef<{ gate: QuantumGate | null }>({ gate: null });
 
@@ -91,6 +98,42 @@ export const App: React.FC = () => {
     const result = simulate(gatesForSimulation, numQubits);
     setSimulationResult(result);
   }, [placedGates, numQubits, simulationStep]);
+
+  // --- Live AI Tutor ---
+  useEffect(() => {
+    if (!isTutorModeActive || placedGates.length === 0) {
+      setTutorMessage(null);
+      setIsTutorLoading(false);
+      if (tutorTimerRef.current) clearTimeout(tutorTimerRef.current);
+      return;
+    }
+
+    if (tutorTimerRef.current) {
+      clearTimeout(tutorTimerRef.current);
+    }
+
+    setIsTutorLoading(true);
+
+    tutorTimerRef.current = window.setTimeout(async () => {
+      try {
+        const circuitDescription = JSON.stringify(placedGates.map(g => ({ gate: g.gateId, qubit: g.qubit, control: g.controlQubit })).slice(-3)); // Only send last few gates for context
+        const response = await getTutorResponse(circuitDescription, numQubits);
+        setTutorMessage(response);
+      } catch (error) {
+        console.error("Tutor AI error:", error);
+        setTutorMessage("I had trouble analyzing that. Please try a different action.");
+      } finally {
+        setIsTutorLoading(false);
+      }
+    }, 2000); // 2-second debounce after last change
+
+    return () => {
+      if (tutorTimerRef.current) {
+        clearTimeout(tutorTimerRef.current);
+      }
+    };
+  }, [placedGates, numQubits, isTutorModeActive]);
+
 
   // --- Gate Selection & Deletion ---
   const handleSelectGate = (instanceId: string) => {
@@ -392,6 +435,10 @@ export const App: React.FC = () => {
       navigator.clipboard.writeText(url);
     }
   }, [state]);
+  
+  const handleToggleTutorMode = useCallback(() => {
+      setIsTutorModeActive(prev => !prev);
+  }, []);
 
   return (
     <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => setSelectedGateId(null)}>
@@ -410,6 +457,8 @@ export const App: React.FC = () => {
             onSave={handleSave}
             onLoad={handleLoad}
             onShare={handleShare}
+            isTutorModeActive={isTutorModeActive}
+            onToggleTutorMode={handleToggleTutorMode}
         />
          <div className="px-4 pt-2">
             <span className="text-xs font-mono bg-gray-700/50 text-gray-400 px-2 py-0.5 rounded">Preview</span>
@@ -464,6 +513,12 @@ export const App: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+      
+      <TutorNotification
+        message={tutorMessage}
+        isLoading={isTutorLoading}
+        onDismiss={() => setTutorMessage(null)}
+      />
     </div>
   );
 };

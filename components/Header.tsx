@@ -7,6 +7,7 @@ import RedoIcon from './icons/RedoIcon';
 import SaveIcon from './icons/SaveIcon';
 import LoadIcon from './icons/LoadIcon';
 import ShareIcon from './icons/ShareIcon';
+import TutorIcon from './icons/TutorIcon';
 
 interface HeaderProps {
   onShowVisualization: () => void;
@@ -17,9 +18,22 @@ interface HeaderProps {
   onSave: () => void;
   onLoad: () => void;
   onShare: () => void;
+  isTutorModeActive: boolean;
+  onToggleTutorMode: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ onShowVisualization, onUndo, onRedo, canUndo, canRedo, onSave, onLoad, onShare }) => {
+const Header: React.FC<HeaderProps> = ({ 
+    onShowVisualization, 
+    onUndo, 
+    onRedo, 
+    canUndo, 
+    canRedo, 
+    onSave, 
+    onLoad, 
+    onShare,
+    isTutorModeActive,
+    onToggleTutorMode
+}) => {
   const [isCopied, setIsCopied] = useState(false);
 
   const handleShareClick = () => {
@@ -65,7 +79,15 @@ const Header: React.FC<HeaderProps> = ({ onShowVisualization, onUndo, onRedo, ca
         </button>
       </div>
 
-      <div className="flex-grow flex justify-end items-center gap-2 text-sm">
+      <div className="flex-grow flex justify-end items-center gap-4 text-sm">
+        <div className="flex items-center gap-2 font-mono text-xs text-gray-400">
+          <TutorIcon className={`w-4 h-4 transition-colors ${isTutorModeActive ? 'text-purple-400' : 'text-gray-500'}`} />
+          <span>Tutor Mode</span>
+          <button onClick={onToggleTutorMode} className={`relative inline-flex items-center h-5 w-9 rounded-full transition-colors ${isTutorModeActive ? 'bg-purple-600' : 'bg-gray-700'}`}>
+              <span className={`inline-block w-3.5 h-3.5 transform bg-white rounded-full transition-transform ${isTutorModeActive ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
+         <div className="w-px h-5 bg-gray-600/50"></div>
         <button 
           onClick={onShowVisualization}
           className="group flex items-center gap-2 px-4 py-1.5 bg-cyan-500/10 text-cyan-300 rounded-md border border-cyan-500/20 hover:bg-cyan-500/20 transition-all"
