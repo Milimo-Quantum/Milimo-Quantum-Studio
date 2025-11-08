@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { motion, useMotionValue, useSpring } from 'framer-motion';
+import { motion, useMotionValue, useSpring, AnimatePresence } from 'framer-motion';
 import type { SimulationResult } from '../types';
 import LogoIcon from './icons/LogoIcon';
-import { getQubitBlochSphereCoordinates } from '../services/quantumSimulator';
+import NoiseIcon from './icons/NoiseIcon';
+import InfoIcon from './icons/InfoIcon';
 
 const SPHERE_SIZE = 220;
 const RADIUS = SPHERE_SIZE / 2;
@@ -44,9 +45,8 @@ const BlochSphere: React.FC<{ x: number; y: number; z: number }> = ({ x, y, z })
 
   const vectorLength = Math.sqrt(x * x + y * y + z * z);
   // Spherical coordinates from Cartesian
-  const phi = Math.atan2(y, x); // Azimuthal angle (from x-axis in xy-plane)
+  const phi = Math.atan2(y, x);
   
-  // SOTA FIX: Clamp the value to prevent Math.acos from returning NaN due to floating point inaccuracies
   const clampedZ = clamp(z / (vectorLength || 1), -1, 1);
   const theta = Math.acos(clampedZ); // Polar angle (from z-axis)
 
@@ -90,21 +90,24 @@ const BlochSphere: React.FC<{ x: number; y: number; z: number }> = ({ x, y, z })
           }}
           initial={{ rotateZ: 0, rotateY: 0 }}
           animate={{
-              rotateZ: phi,
-              rotateY: theta,
+              rotateZ: phi * (180 / Math.PI),
+              rotateY: theta * (180 / Math.PI),
           }}
           transition={{type: 'spring', stiffness: 200, damping: 20}}
         >
-            <div
+            <motion.div
                 className="w-full bg-gradient-to-t from-purple-400 to-purple-300"
-                style={{ height: `${vectorLength * 100}%`, transformStyle: 'preserve-3d' }}
+                style={{ transformStyle: 'preserve-3d' }}
+                initial={{height: '100%'}}
+                animate={{height: `${vectorLength * 100}%`}}
+                transition={{type: 'spring', stiffness: 200, damping: 20}}
             >
               {/* Arrowhead */}
               <div
                 className="absolute -top-px left-1/2 w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-b-[8px] border-b-purple-200"
                 style={{ transform: 'translateX(-50%) rotateX(90deg) translateZ(5px)'}}
               />
-            </div>
+            </motion.div>
         </motion.div>
 
         {/* Labels */}
@@ -118,20 +121,56 @@ const BlochSphere: React.FC<{ x: number; y: number; z: number }> = ({ x, y, z })
   );
 };
 
+const NoiseSlider: React.FC<{
+    label: string;
+    description: string;
+    value: number;
+    setValue: (val: number) => void;
+}> = ({ label, description, value, setValue }) => (
+    <div>
+        <div className="flex justify-between items-center mb-1">
+            <label className="text-xs text-gray-400 flex items-center gap-1.5">
+                {label}
+                 <div className="group relative">
+                    <InfoIcon className="w-3 h-3 text-gray-500" />
+                    <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 p-2 bg-gray-900 border border-gray-700 rounded-md text-xs text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30">
+                        {description}
+                    </div>
+                </div>
+            </label>
+            <span className="text-xs text-gray-200 w-10 text-right">{(value * 100).toFixed(0)}%</span>
+        </div>
+        <input
+            type="range"
+            min="0"
+            max="0.1"
+            step="0.005"
+            value={value}
+            onChange={(e) => setValue(parseFloat(e.target.value))}
+            className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer range-sm"
+        />
+    </div>
+);
+
 
 interface VisualizationPanelProps {
   result: SimulationResult | null;
   visualizedQubit: number;
   numQubits: number;
+  depolarizingError: number;
+  setDepolarizingError: (value: number) => void;
+  phaseDampingError: number;
+  setPhaseDampingError: (value: number) => void;
 }
 
-const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visualizedQubit, numQubits }) => {
+const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visualizedQubit, depolarizingError, setDepolarizingError, phaseDampingError, setPhaseDampingError }) => {
+  const [isNoisePanelOpen, setIsNoisePanelOpen] = useState(false);
   const hasResult = result && result.probabilities.length > 0;
 
-  const coordinates = useMemo(() => {
-    if (!result || !result.stateVector) return { x: 0, y: 0, z: 1 }; // Default to |0> state
-    return getQubitBlochSphereCoordinates(result.stateVector, visualizedQubit, numQubits);
-  }, [result, visualizedQubit, numQubits]);
+  const visualizedQubitState = useMemo(() => {
+    if (!hasResult) return null;
+    return result.qubitStates[visualizedQubit];
+  }, [result, visualizedQubit, hasResult]);
   
   return (
     <motion.div
@@ -151,12 +190,49 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
       ) : (
         <>
             <div>
-                <h3 className="text-gray-400 mb-3">Bloch Sphere (q[{visualizedQubit}])</h3>
+                <h3 className="text-gray-400 mb-1">Bloch Sphere (q[{visualizedQubit}])</h3>
+                <p className="text-xs text-gray-500 mb-3">Purity: {visualizedQubitState?.purity.toFixed(3)}</p>
                 <div className="w-full aspect-square bg-gray-800/20 border border-gray-600/30 rounded-lg flex items-center justify-center p-4">
-                    <BlochSphere {...coordinates} />
+                    {visualizedQubitState && <BlochSphere {...visualizedQubitState.blochSphereCoords} />}
                 </div>
                 <p className="text-center text-xs text-gray-500 mt-2">Click and drag to rotate the sphere.</p>
             </div>
+
+            <div>
+                 <button onClick={() => setIsNoisePanelOpen(p => !p)} className="w-full flex justify-between items-center text-gray-400 mb-3">
+                    <div className="flex items-center gap-2">
+                        <NoiseIcon className="w-4 h-4" />
+                        Noise Models
+                    </div>
+                     <svg className={`w-4 h-4 transition-transform ${isNoisePanelOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                 </button>
+                 <AnimatePresence>
+                 {isNoisePanelOpen && (
+                     <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                     >
+                        <div className="p-4 bg-gray-800/20 border border-gray-600/30 rounded-lg space-y-4 mb-4">
+                            <NoiseSlider 
+                                label="Depolarizing Error"
+                                description="Simulates random bit-flip (X), phase-flip (Z), or both (Y) errors occurring after each gate operation."
+                                value={depolarizingError}
+                                setValue={setDepolarizingError}
+                            />
+                             <NoiseSlider 
+                                label="Phase Damping"
+                                description="Simulates decoherence, the loss of quantum information to the environment over time, causing superposition to decay."
+                                value={phaseDampingError}
+                                setValue={setPhaseDampingError}
+                            />
+                        </div>
+                     </motion.div>
+                 )}
+                 </AnimatePresence>
+            </div>
+
              <div>
                 <h3 className="text-gray-400 mb-3">Measurement Probabilities</h3>
                 <div className="space-y-2">

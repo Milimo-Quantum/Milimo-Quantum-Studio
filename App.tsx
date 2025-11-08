@@ -70,6 +70,10 @@ export const App: React.FC = () => {
   const [isTutorLoading, setIsTutorLoading] = useState(false);
   const tutorTimerRef = useRef<number | null>(null);
 
+  // --- Noise Model State ---
+  const [depolarizingError, setDepolarizingError] = useState(0);
+  const [phaseDampingError, setPhaseDampingError] = useState(0);
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragInfoRef = useRef<{ component: QuantumGate | CustomGateDefinition | null }>({ component: null });
 
@@ -90,16 +94,17 @@ export const App: React.FC = () => {
 
   // --- Live & Stepped Simulation Engine ---
   useEffect(() => {
-    const getGates = (items: PlacedItem[]): PlacedGate[] => items.filter((i): i is PlacedGate => 'gateId' in i);
-
     let itemsForSimulation = placedItems;
     if (simulationStep !== null) {
       const sortedItems = [...placedItems].sort((a, b) => a.left - b.left);
       itemsForSimulation = sortedItems.slice(0, simulationStep);
     }
-    const result = simulate(itemsForSimulation, numQubits, customGateDefinitions);
+    const result = simulate(itemsForSimulation, numQubits, customGateDefinitions, {
+        depolarizing: depolarizingError,
+        phaseDamping: phaseDampingError,
+    });
     setSimulationResult(result);
-  }, [placedItems, numQubits, simulationStep, customGateDefinitions]);
+  }, [placedItems, numQubits, simulationStep, customGateDefinitions, depolarizingError, phaseDampingError]);
 
   // --- Live AI Tutor ---
   useEffect(() => {
@@ -514,9 +519,6 @@ export const App: React.FC = () => {
 
   }, [placedItems, selectedItemIds, state, customGateDefinitions, setState]);
 
-  const draggableComponent = draggingComponent?.component;
-  const isDraggableQuantumGate = (c: any): c is QuantumGate => c && 'gateId' in c;
-
   return (
     <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => setSelectedItemIds([])}>
       <div className="absolute inset-0 z-0 opacity-20">
@@ -579,6 +581,10 @@ export const App: React.FC = () => {
             customGateDefs={customGateDefinitions}
             visualizedQubit={visualizedQubit}
             numQubits={numQubits}
+            depolarizingError={depolarizingError}
+            setDepolarizingError={setDepolarizingError}
+            phaseDampingError={phaseDampingError}
+            setPhaseDampingError={setPhaseDampingError}
           />
         </main>
       </div>

@@ -18,10 +18,26 @@ interface RightPanelProps {
   customGateDefs: CustomGateDefinition[];
   visualizedQubit: number;
   numQubits: number;
+  depolarizingError: number;
+  setDepolarizingError: (value: number) => void;
+  phaseDampingError: number;
+  setPhaseDampingError: (value: number) => void;
 }
 
 const RightPanel: React.FC<RightPanelProps> = (props) => {
-  const { activeTab, setActiveTab, simulationResult, placedItems, customGateDefs, visualizedQubit, numQubits } = props;
+  const { 
+    activeTab, 
+    setActiveTab, 
+    simulationResult, 
+    placedItems, 
+    customGateDefs, 
+    visualizedQubit, 
+    numQubits,
+    depolarizingError,
+    setDepolarizingError,
+    phaseDampingError,
+    setPhaseDampingError,
+  } = props;
 
   const tabs: { id: Tab, label: string }[] = [
     { id: 'copilot', label: 'Milimo AI' },
@@ -59,7 +75,15 @@ const RightPanel: React.FC<RightPanelProps> = (props) => {
       <div className="relative flex-1 min-h-0">
         <AnimatePresence mode="wait">
           {activeTab === 'copilot' && <CopilotChat {...props} />}
-          {activeTab === 'visualization' && <VisualizationPanel result={simulationResult} visualizedQubit={visualizedQubit} numQubits={numQubits} />}
+          {activeTab === 'visualization' && <VisualizationPanel 
+            result={simulationResult} 
+            visualizedQubit={visualizedQubit} 
+            numQubits={numQubits} 
+            depolarizingError={depolarizingError}
+            setDepolarizingError={setDepolarizingError}
+            phaseDampingError={phaseDampingError}
+            setPhaseDampingError={setPhaseDampingError}
+          />}
           {activeTab === 'code' && <CodePanel placedItems={placedItems} customGateDefs={customGateDefs} numQubits={numQubits} />}
         </AnimatePresence>
       </div>

@@ -105,7 +105,13 @@ export interface Probability {
   value: number;
 }
 
+export interface QubitState {
+    blochSphereCoords: { x: number, y: number, z: number };
+    purity: number;
+}
+
 export interface SimulationResult {
   probabilities: Probability[];
-  stateVector: ComplexNumber[];
+  qubitStates: QubitState[];
+  trace: number; // For debugging, should be ~1.0
 }
