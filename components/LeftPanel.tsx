@@ -1,21 +1,22 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import type { QuantumGate } from '../types';
+import type { QuantumGate, CustomGateDefinition } from '../types';
 import QuantumGateComponent from './QuantumGate';
 import { gates } from '../data/gates';
 
 interface LeftPanelProps {
-    onDragInitiate: (gate: QuantumGate, event: React.PointerEvent) => void;
-    draggingGateId?: string;
+    onDragInitiate: (gate: QuantumGate | CustomGateDefinition, event: React.PointerEvent) => void;
+    draggingComponentId?: string;
+    customGates: CustomGateDefinition[];
 }
 
-const DraggableGate: React.FC<{
-    gate: QuantumGate,
+const DraggableComponent: React.FC<{
+    component: QuantumGate | CustomGateDefinition,
     onDragInitiate: LeftPanelProps['onDragInitiate'],
-    draggingGateId?: string,
+    draggingComponentId?: string,
     animationDelay: number
-}> = ({ gate, onDragInitiate, draggingGateId, animationDelay }) => {
-    const isBeingDragged = gate.id === draggingGateId;
+}> = ({ component, onDragInitiate, draggingComponentId, animationDelay }) => {
+    const isBeingDragged = component.id === draggingComponentId;
 
     return (
         <motion.div
@@ -24,15 +25,15 @@ const DraggableGate: React.FC<{
             transition={{ duration: 0.3, delay: animationDelay }}
             className={isBeingDragged ? 'opacity-40' : ''}
             style={{ cursor: 'grab', touchAction: 'none' }}
-            onPointerDown={(e) => onDragInitiate(gate, e)}
+            onPointerDown={(e) => onDragInitiate(component, e)}
         >
-            <QuantumGateComponent gate={gate} />
+            <QuantumGateComponent gate={component} />
         </motion.div>
     )
 }
 
 
-const LeftPanel: React.FC<LeftPanelProps> = ({ onDragInitiate, draggingGateId }) => {
+const LeftPanel: React.FC<LeftPanelProps> = ({ onDragInitiate, draggingComponentId, customGates }) => {
   return (
     <motion.aside
       initial={{ x: -300, opacity: 0 }}
@@ -44,14 +45,30 @@ const LeftPanel: React.FC<LeftPanelProps> = ({ onDragInitiate, draggingGateId })
       <div className="flex flex-col gap-2 overflow-y-auto overflow-x-hidden">
         <p className="text-xs text-gray-500 font-['IBM_Plex_Mono'] uppercase tracking-wider mb-2">Quantum Gates</p>
         {gates.map((gate, index) => (
-          <DraggableGate
+          <DraggableComponent
             key={gate.id}
-            gate={gate}
+            component={gate}
             onDragInitiate={onDragInitiate}
-            draggingGateId={draggingGateId}
+            draggingComponentId={draggingComponentId}
             animationDelay={0.4 + index * 0.05}
           />
         ))}
+
+        {customGates.length > 0 && (
+            <>
+                <div className="h-px bg-gray-700/50 my-2"></div>
+                <p className="text-xs text-gray-500 font-['IBM_Plex_Mono'] uppercase tracking-wider mb-2">Custom Gates</p>
+                {customGates.map((gate, index) => (
+                    <DraggableComponent
+                        key={gate.id}
+                        component={gate}
+                        onDragInitiate={onDragInitiate}
+                        draggingComponentId={draggingComponentId}
+                        animationDelay={0.4 + (gates.length + index) * 0.05}
+                    />
+                ))}
+            </>
+        )}
       </div>
     </motion.aside>
   );

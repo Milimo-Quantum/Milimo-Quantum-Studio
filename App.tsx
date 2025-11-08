@@ -3,7 +3,7 @@ import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import CircuitCanvas from './components/CircuitCanvas';
 import RightPanel from './components/RightPanel';
-import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState } from './types';
+import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
 import { getAgentResponse, getTutorResponse } from './services/geminiService';
@@ -14,7 +14,8 @@ import TutorNotification from './components/TutorNotification';
 
 const INITIAL_STATE: CircuitState = {
   numQubits: 3,
-  placedGates: [],
+  placedItems: [],
+  customGateDefinitions: [],
 };
 
 const encodeCircuit = (data: CircuitState): string => {
@@ -49,11 +50,10 @@ export const App: React.FC = () => {
     canRedo 
   } = useHistory<CircuitState>(INITIAL_STATE);
 
-  const { numQubits, placedGates } = state;
-
-  const [selectedGateId, setSelectedGateId] = useState<string | null>(null);
+  const { numQubits, placedItems, customGateDefinitions } = state;
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [draggingGate, setDraggingGate] = useState<{gate: QuantumGate, point: {x: number, y: number}} | null>(null);
+  const [draggingComponent, setDraggingComponent] = useState<{component: QuantumGate | CustomGateDefinition, point: {x: number, y: number}} | null>(null);
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [activeTab, setActiveTab] = useState<'copilot' | 'visualization' | 'code'>('copilot');
   const [visualizedQubit, setVisualizedQubit] = useState<number>(0);
@@ -71,7 +71,7 @@ export const App: React.FC = () => {
   const tutorTimerRef = useRef<number | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
-  const dragInfoRef = useRef<{ gate: QuantumGate | null }>({ gate: null });
+  const dragInfoRef = useRef<{ component: QuantumGate | CustomGateDefinition | null }>({ component: null });
 
   // --- Load from URL on mount ---
   useEffect(() => {
@@ -80,7 +80,7 @@ export const App: React.FC = () => {
     if (circuitData) {
       const decodedState = decodeCircuit(circuitData);
       if (decodedState) {
-        if (typeof decodedState.numQubits === 'number' && Array.isArray(decodedState.placedGates)) {
+        if (typeof decodedState.numQubits === 'number' && Array.isArray(decodedState.placedItems)) {
           setState(decodedState, true); // Overwrite history
           window.history.replaceState({}, document.title, window.location.pathname);
         }
@@ -90,18 +90,20 @@ export const App: React.FC = () => {
 
   // --- Live & Stepped Simulation Engine ---
   useEffect(() => {
-    let gatesForSimulation = placedGates;
+    const getGates = (items: PlacedItem[]): PlacedGate[] => items.filter((i): i is PlacedGate => 'gateId' in i);
+
+    let itemsForSimulation = placedItems;
     if (simulationStep !== null) {
-      const sortedGates = [...placedGates].sort((a, b) => a.left - b.left);
-      gatesForSimulation = sortedGates.slice(0, simulationStep);
+      const sortedItems = [...placedItems].sort((a, b) => a.left - b.left);
+      itemsForSimulation = sortedItems.slice(0, simulationStep);
     }
-    const result = simulate(gatesForSimulation, numQubits);
+    const result = simulate(itemsForSimulation, numQubits, customGateDefinitions);
     setSimulationResult(result);
-  }, [placedGates, numQubits, simulationStep]);
+  }, [placedItems, numQubits, simulationStep, customGateDefinitions]);
 
   // --- Live AI Tutor ---
   useEffect(() => {
-    if (!isTutorModeActive || placedGates.length === 0) {
+    if (!isTutorModeActive || placedItems.length === 0) {
       setTutorMessage(null);
       setIsTutorLoading(false);
       if (tutorTimerRef.current) clearTimeout(tutorTimerRef.current);
@@ -116,7 +118,7 @@ export const App: React.FC = () => {
 
     tutorTimerRef.current = window.setTimeout(async () => {
       try {
-        const circuitDescription = JSON.stringify(placedGates.map(g => ({ gate: g.gateId, qubit: g.qubit, control: g.controlQubit })).slice(-3)); // Only send last few gates for context
+        const circuitDescription = JSON.stringify(placedItems.map(g => ('gateId' in g ? { gate: g.gateId, qubit: g.qubit, control: g.controlQubit } : { customGate: g.customGateId, qubit: g.qubit })).slice(-3));
         const response = await getTutorResponse(circuitDescription, numQubits);
         setTutorMessage(response);
       } catch (error) {
@@ -132,22 +134,29 @@ export const App: React.FC = () => {
         clearTimeout(tutorTimerRef.current);
       }
     };
-  }, [placedGates, numQubits, isTutorModeActive]);
+  }, [placedItems, numQubits, isTutorModeActive]);
 
 
-  // --- Gate Selection & Deletion ---
-  const handleSelectGate = (instanceId: string) => {
-    setSelectedGateId(prevId => prevId === instanceId ? null : instanceId);
+  // --- Item Selection & Deletion ---
+  const handleSelectItem = (instanceId: string, isShiftPressed: boolean) => {
+    setSelectedItemIds(prevIds => {
+      if (isShiftPressed) {
+        // Toggle selection
+        return prevIds.includes(instanceId) ? prevIds.filter(id => id !== instanceId) : [...prevIds, instanceId];
+      }
+      // Single selection
+      return prevIds.includes(instanceId) && prevIds.length === 1 ? [] : [instanceId];
+    });
   };
   
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.key === 'Backspace' || event.key === 'Delete') && selectedGateId) {
+      if ((event.key === 'Backspace' || event.key === 'Delete') && selectedItemIds.length > 0) {
         setState({
           ...state,
-          placedGates: state.placedGates.filter(g => g.instanceId !== selectedGateId)
+          placedItems: state.placedItems.filter(item => !selectedItemIds.includes(item.instanceId))
         });
-        setSelectedGateId(null);
+        setSelectedItemIds([]);
       }
        // Undo/Redo shortcuts
       if ((event.metaKey || event.ctrlKey) && event.key === 'z') {
@@ -165,23 +174,25 @@ export const App: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedGateId, state, setState, undo, redo]);
+  }, [selectedItemIds, state, setState, undo, redo]);
 
   const handleNumQubitsChange = useCallback((newNumQubits: number) => {
     if (newNumQubits >= 2 && newNumQubits <= 5) {
       setState({
+        ...state,
         numQubits: newNumQubits,
-        placedGates: [] // Clear circuit on qubit change
+        placedItems: [] // Clear circuit on qubit change
       });
-      setSelectedGateId(null);
+      setSelectedItemIds([]);
       if (visualizedQubit >= newNumQubits) {
         setVisualizedQubit(0);
       }
     }
-  }, [visualizedQubit, setState]);
+  }, [visualizedQubit, setState, state]);
 
 
   const executeActions = useCallback((actions: AIAction[]) => {
+    const currentPlacedGates = placedItems.filter((i): i is PlacedGate => 'gateId' in i);
     // 1. Determine the final number of qubits. This is the ground truth for all subsequent validation.
     const setQubitAction = actions.find(a => a.type === 'set_qubit_count');
     const finalNumQubits = setQubitAction && setQubitAction.type === 'set_qubit_count' 
@@ -209,7 +220,7 @@ export const App: React.FC = () => {
         gatePayloads = addActions.map(a => a.payload);
     } else {
         // Otherwise, start with the current gates and append any new ones.
-        const currentGates = placedGates.map(({ instanceId, isSelected, ...rest }) => rest);
+        const currentGates = currentPlacedGates.map(({ instanceId, isSelected, ...rest }) => rest);
         const addedGates = actions
             .filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate')
             .map(a => a.payload);
@@ -236,10 +247,11 @@ export const App: React.FC = () => {
     
     // 4. Atomically apply the final state to React history.
     setState({
+        ...state,
         numQubits: finalNumQubits,
-        placedGates: validatedPlacedGates,
+        placedItems: validatedPlacedGates,
     });
-    setSelectedGateId(null);
+    setSelectedItemIds([]);
 
     // Update visualizedQubit if it's now out of bounds.
     if (visualizedQubit >= finalNumQubits) {
@@ -251,12 +263,12 @@ export const App: React.FC = () => {
         setActiveTab('code');
     }
 
-  }, [numQubits, placedGates, visualizedQubit, setVisualizedQubit, setActiveTab, setState]);
+  }, [numQubits, placedItems, visualizedQubit, setVisualizedQubit, setActiveTab, setState, state]);
 
 
   const handleSend = useCallback(async (prompt: string) => {
     if (prompt.trim() === '' || isAiLoading) return;
-    setSelectedGateId(null);
+    setSelectedItemIds([]);
     setSimulationStep(null); // Exit step-through mode when interacting with AI
 
     const userMessage: Message = { type: 'text', sender: 'user', text: prompt };
@@ -266,6 +278,8 @@ export const App: React.FC = () => {
     setMessages([...allMessages, agentStatusMessage]);
     setIsAiLoading(true);
     setActiveTab('copilot');
+
+    const placedGates = placedItems.filter((i): i is PlacedGate => 'gateId' in i);
 
     const onStatusUpdate = (update: AgentStatusUpdate) => {
       setMessages(prev => {
@@ -304,7 +318,7 @@ export const App: React.FC = () => {
     } finally {
       setIsAiLoading(false);
     }
-  }, [isAiLoading, placedGates, messages, executeActions, simulationResult, numQubits]);
+  }, [isAiLoading, placedItems, messages, executeActions, simulationResult, numQubits]);
 
   const handleAnalyzeCircuit = useCallback(() => {
     handleSend("Analyze my current circuit. Identify its purpose if it's a known algorithm or state, explain the principles behind it, and propose potential next steps or interesting modifications.");
@@ -319,8 +333,8 @@ export const App: React.FC = () => {
   }, [handleSend]);
 
   const handleClearCircuit = useCallback(() => {
-    setState({ ...state, placedGates: [] });
-    setSelectedGateId(null);
+    setState({ ...state, placedItems: [] });
+    setSelectedItemIds([]);
     setSimulationStep(null);
   }, [state, setState]);
 
@@ -335,9 +349,9 @@ export const App: React.FC = () => {
     }
   }, [handleSend]);
 
-  const handleGateDrop = (gateId: string, point: { x: number; y: number }) => {
+  const handleComponentDrop = (componentId: string, point: { x: number; y: number }) => {
     if (!canvasRef.current) return;
-    setSelectedGateId(null);
+    setSelectedItemIds([]);
 
     const canvasRect = canvasRef.current.getBoundingClientRect();
     if (
@@ -354,63 +368,75 @@ export const App: React.FC = () => {
       const relativeX = point.x - canvasRect.left - PADDING;
       const canvasContentWidth = canvasRect.width - PADDING * 2;
       const leftPercent = Math.max(0, Math.min(100, (relativeX / canvasContentWidth) * 100));
+      
+      let newItem: PlacedItem;
+      const gateInfo = gateMap.get(componentId);
 
-      const gateInfo = gateMap.get(gateId);
-      const newGate: PlacedGate = {
-        instanceId: `${gateId}-${Date.now()}`,
-        gateId: gateId,
-        qubit: qubitIndex,
-        left: leftPercent,
-      };
+      if (gateInfo) {
+          const newGate: PlacedGate = {
+              instanceId: `${componentId}-${Date.now()}`,
+              gateId: componentId,
+              qubit: qubitIndex,
+              left: leftPercent,
+          };
 
-      if (gateInfo?.type === 'control') {
-        let controlIndex;
-        if (qubitIndex < numQubits - 1) {
-          controlIndex = qubitIndex + 1;
-        } else {
-          controlIndex = qubitIndex - 1;
-        }
-        
-        if(gateInfo.id === 'swap') {
-            newGate.controlQubit = controlIndex;
-        } else {
-            newGate.qubit = controlIndex; // Target is the other line
-            newGate.controlQubit = qubitIndex; // Control is the dropped line
-        }
+          if (gateInfo?.type === 'control') {
+              let controlIndex;
+              if (qubitIndex < numQubits - 1) {
+                  controlIndex = qubitIndex + 1;
+              } else {
+                  controlIndex = qubitIndex - 1;
+              }
+              
+              if(gateInfo.id === 'swap') {
+                  newGate.controlQubit = controlIndex;
+              } else {
+                  newGate.qubit = controlIndex; // Target is the other line
+                  newGate.controlQubit = qubitIndex; // Control is the dropped line
+              }
+          }
+          newItem = newGate;
+      } else {
+          // It's a custom gate
+          newItem = {
+              instanceId: `${componentId}-${Date.now()}`,
+              customGateId: componentId,
+              qubit: qubitIndex,
+              left: leftPercent,
+          }
       }
 
-      setState({ ...state, placedGates: [...state.placedGates, newGate] });
+      setState({ ...state, placedItems: [...state.placedItems, newItem] });
     }
   };
   
   const handlePointerMove = useCallback((event: PointerEvent) => {
-    setDraggingGate(g => g ? { ...g, point: { x: event.clientX, y: event.clientY } } : null);
+    setDraggingComponent(g => g ? { ...g, point: { x: event.clientX, y: event.clientY } } : null);
   }, []);
 
   const handlePointerUp = useCallback((event: PointerEvent) => {
     window.removeEventListener('pointermove', handlePointerMove);
     window.removeEventListener('pointerup', handlePointerUp);
-    if (dragInfoRef.current.gate) {
-      handleGateDrop(dragInfoRef.current.gate.id, { x: event.clientX, y: event.clientY });
+    if (dragInfoRef.current.component) {
+      handleComponentDrop(dragInfoRef.current.component.id, { x: event.clientX, y: event.clientY });
     }
     setIsDragging(false);
-    setDraggingGate(null);
-    dragInfoRef.current.gate = null;
-  }, [handlePointerMove, handleGateDrop]);
+    setDraggingComponent(null);
+    dragInfoRef.current.component = null;
+  }, [handlePointerMove, handleComponentDrop]);
 
-  const handleDragInitiate = (gate: QuantumGate, event: React.PointerEvent) => {
+  const handleDragInitiate = (component: QuantumGate | CustomGateDefinition, event: React.PointerEvent) => {
     event.preventDefault();
     event.stopPropagation();
     setIsDragging(true);
-    setDraggingGate({ gate, point: { x: event.clientX, y: event.clientY } });
-    dragInfoRef.current.gate = gate;
+    setDraggingComponent({ component, point: { x: event.clientX, y: event.clientY } });
+    dragInfoRef.current.component = component;
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
   };
   
   const handleSave = useCallback(() => {
     localStorage.setItem('milimo_quantum_circuit', JSON.stringify(state));
-    // Add a visual confirmation if desired
   }, [state]);
 
   const handleLoad = useCallback(() => {
@@ -419,7 +445,7 @@ export const App: React.FC = () => {
         try {
             const parsedState = JSON.parse(savedState);
             // Basic validation
-            if (typeof parsedState.numQubits === 'number' && Array.isArray(parsedState.placedGates)) {
+            if (typeof parsedState.numQubits === 'number' && Array.isArray(parsedState.placedItems)) {
                 setState(parsedState, true); // true to overwrite history
             }
         } catch (e) {
@@ -440,8 +466,59 @@ export const App: React.FC = () => {
       setIsTutorModeActive(prev => !prev);
   }, []);
 
+  const handleGroupSelection = useCallback(() => {
+    const selectedGates = placedItems.filter(
+      (item): item is PlacedGate => selectedItemIds.includes(item.instanceId) && 'gateId' in item
+    );
+
+    if (selectedGates.length <= 1) return;
+
+    const name = prompt("Enter a name for your custom gate:");
+    if (!name) return;
+
+    const minLeft = Math.min(...selectedGates.map(g => g.left));
+    const maxLeft = Math.max(...selectedGates.map(g => g.left));
+    const width = maxLeft - minLeft;
+    const minQubit = Math.min(...selectedGates.map(g => g.controlQubit ?? g.qubit), ...selectedGates.map(g => g.qubit));
+
+    const relativeGates = selectedGates.map(gate => ({
+      ...gate,
+      qubit: gate.qubit - minQubit,
+      controlQubit: gate.controlQubit !== undefined ? gate.controlQubit - minQubit : undefined,
+      left: width > 0 ? ((gate.left - minLeft) / width) * 100 : 50,
+    }));
+    
+    const newCustomGateDef: CustomGateDefinition = {
+        id: `custom-${name.replace(/\s/g, '-')}-${Date.now()}`,
+        name,
+        color: 'text-orange-400', // Or a random color
+        gates: relativeGates,
+    };
+
+    const newPlacedCustomGate = {
+        instanceId: `${newCustomGateDef.id}-${Date.now()}`,
+        customGateId: newCustomGateDef.id,
+        qubit: minQubit,
+        left: minLeft,
+    };
+    
+    const newPlacedItems = placedItems.filter(item => !selectedItemIds.includes(item.instanceId));
+    newPlacedItems.push(newPlacedCustomGate);
+
+    setState({
+        ...state,
+        placedItems: newPlacedItems,
+        customGateDefinitions: [...customGateDefinitions, newCustomGateDef],
+    });
+    setSelectedItemIds([]);
+
+  }, [placedItems, selectedItemIds, state, customGateDefinitions, setState]);
+
+  const draggableComponent = draggingComponent?.component;
+  const isDraggableQuantumGate = (c: any): c is QuantumGate => c && 'gateId' in c;
+
   return (
-    <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => setSelectedGateId(null)}>
+    <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => setSelectedItemIds([])}>
       <div className="absolute inset-0 z-0 opacity-20">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(120,81,250,0.2),_transparent_40%)]"></div>
         <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre-v2.png')] opacity-20"></div>
@@ -464,21 +541,27 @@ export const App: React.FC = () => {
             <span className="text-xs font-mono bg-gray-700/50 text-gray-400 px-2 py-0.5 rounded">Preview</span>
         </div>
         <main className="flex flex-grow p-4 gap-4">
-          <LeftPanel onDragInitiate={handleDragInitiate} draggingGateId={draggingGate?.gate.id} />
+          <LeftPanel 
+            onDragInitiate={handleDragInitiate} 
+            draggingComponentId={draggingComponent?.component.id} 
+            customGates={customGateDefinitions}
+          />
           <div className="flex-grow flex flex-col gap-4">
             <CircuitCanvas 
               ref={canvasRef}
               numQubits={numQubits}
               onNumQubitsChange={handleNumQubitsChange}
-              placedGates={placedGates} 
+              placedItems={placedItems}
+              customGateDefs={customGateDefinitions}
               isDragging={isDragging} 
               onAnalyzeCircuit={handleAnalyzeCircuit}
               onDebugCircuit={handleDebugCircuit}
               onOptimizeCircuit={handleOptimizeCircuit}
               onClear={handleClearCircuit}
               onExplainGate={handleExplainGate}
-              selectedGateId={selectedGateId}
-              onSelectGate={handleSelectGate}
+              onGroupSelection={handleGroupSelection}
+              selectedItemIds={selectedItemIds}
+              onSelectItem={handleSelectItem}
               visualizedQubit={visualizedQubit}
               setVisualizedQubit={setVisualizedQubit}
               simulationStep={simulationStep}
@@ -492,7 +575,8 @@ export const App: React.FC = () => {
             simulationResult={simulationResult}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
-            placedGates={placedGates}
+            placedItems={placedItems}
+            customGateDefs={customGateDefinitions}
             visualizedQubit={visualizedQubit}
             numQubits={numQubits}
           />
@@ -500,16 +584,16 @@ export const App: React.FC = () => {
       </div>
 
       <AnimatePresence>
-        {draggingGate && (
+        {draggingComponent && (
           <motion.div
             className="absolute top-0 left-0"
-            style={{ translateX: draggingGate.point.x, translateY: draggingGate.point.y, x: '-50%', y: '-50%', zIndex: 9999, pointerEvents: 'none' }}
+            style={{ translateX: draggingComponent.point.x, translateY: draggingComponent.point.y, x: '-50%', y: '-50%', zIndex: 9999, pointerEvents: 'none' }}
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1.1 }}
             exit={{ opacity: 0, scale: 0.8 }}
             transition={{ duration: 0.1 }}
           >
-            <QuantumGateComponent gate={draggingGate.gate} />
+            <QuantumGateComponent gate={draggingComponent.component} />
           </motion.div>
         )}
       </AnimatePresence>

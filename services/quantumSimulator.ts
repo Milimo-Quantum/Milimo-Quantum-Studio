@@ -1,4 +1,4 @@
-import type { PlacedGate, SimulationResult, ComplexNumber } from '../types';
+import type { PlacedGate, SimulationResult, ComplexNumber, PlacedItem, CustomGateDefinition } from '../types';
 
 // --- Complex Number Math ---
 class Complex {
@@ -60,17 +60,56 @@ const isValidQubit = (qubit: number | undefined, numQubits: number) => {
 }
 
 /**
+ * Expands all custom gates in a circuit into their fundamental gate components.
+ * @param placedItems The array of items on the canvas.
+ * @param customGateDefs The definitions of all custom gates.
+ * @returns An array of only PlacedGate objects.
+ */
+export const unrollCircuit = (
+  placedItems: PlacedItem[],
+  customGateDefs: CustomGateDefinition[]
+): PlacedGate[] => {
+  const unrolledGates: PlacedGate[] = [];
+
+  for (const item of placedItems) {
+    if ('gateId' in item) {
+      unrolledGates.push(item);
+    } else if ('customGateId' in item) {
+      const def = customGateDefs.find(d => d.id === item.customGateId);
+      if (def) {
+        const minLeft = Math.min(...def.gates.map(g => g.left));
+        const maxLeft = Math.max(...def.gates.map(g => g.left));
+        const width = maxLeft > minLeft ? maxLeft - minLeft : 1; // Avoid division by zero
+
+        for (const relativeGate of def.gates) {
+           unrolledGates.push({
+             ...relativeGate,
+             instanceId: `${item.instanceId}-${relativeGate.gateId}-${Math.random()}`,
+             qubit: item.qubit + relativeGate.qubit,
+             controlQubit: relativeGate.controlQubit !== undefined ? item.qubit + relativeGate.controlQubit : undefined,
+             left: item.left // For now, treat all gates inside as being at the same column
+           });
+        }
+      }
+    }
+  }
+  return unrolledGates;
+};
+
+
+/**
  * Simulates a quantum circuit and returns the measurement probabilities.
- * @param placedGates The array of gates placed on the canvas.
+ * @param placedItems The array of gates and custom gates placed on the canvas.
  * @param numQubits The total number of qubits in the circuit.
  * @returns A SimulationResult object with probabilities and the final state vector.
  */
-export const simulate = (placedGates: PlacedGate[], numQubits: number): SimulationResult => {
+export const simulate = (placedItems: PlacedItem[], numQubits: number, customGateDefs: CustomGateDefinition[]): SimulationResult => {
   const numStates = 1 << numQubits;
   let stateVector: Complex[] = Array.from({ length: numStates }, () => new Complex(0));
   stateVector[0] = new Complex(1); // Initialize to |00...0>
 
-  const sortedGates = [...placedGates].sort((a, b) => a.left - b.left);
+  const placedGates = unrollCircuit(placedItems, customGateDefs);
+  const sortedGates = placedGates.sort((a, b) => a.left - b.left);
 
   for (const gate of sortedGates) {
     let newStateVector = [...stateVector];

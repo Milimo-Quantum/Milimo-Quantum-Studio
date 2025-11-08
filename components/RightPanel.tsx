@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import CopilotChat from './CopilotChat';
 import VisualizationPanel from './VisualizationPanel';
 import CodePanel from './CodePanel';
-import type { Message, SimulationResult, PlacedGate } from '../types';
+import type { Message, SimulationResult, PlacedItem, CustomGateDefinition } from '../types';
 
 type Tab = 'copilot' | 'visualization' | 'code';
 
@@ -14,13 +14,14 @@ interface RightPanelProps {
   simulationResult: SimulationResult | null;
   activeTab: Tab;
   setActiveTab: (tab: Tab) => void;
-  placedGates: PlacedGate[];
+  placedItems: PlacedItem[];
+  customGateDefs: CustomGateDefinition[];
   visualizedQubit: number;
   numQubits: number;
 }
 
 const RightPanel: React.FC<RightPanelProps> = (props) => {
-  const { activeTab, setActiveTab, simulationResult, placedGates, visualizedQubit, numQubits } = props;
+  const { activeTab, setActiveTab, simulationResult, placedItems, customGateDefs, visualizedQubit, numQubits } = props;
 
   const tabs: { id: Tab, label: string }[] = [
     { id: 'copilot', label: 'Milimo AI' },
@@ -59,7 +60,7 @@ const RightPanel: React.FC<RightPanelProps> = (props) => {
         <AnimatePresence mode="wait">
           {activeTab === 'copilot' && <CopilotChat {...props} />}
           {activeTab === 'visualization' && <VisualizationPanel result={simulationResult} visualizedQubit={visualizedQubit} numQubits={numQubits} />}
-          {activeTab === 'code' && <CodePanel placedGates={placedGates} numQubits={numQubits} />}
+          {activeTab === 'code' && <CodePanel placedItems={placedItems} customGateDefs={customGateDefs} numQubits={numQubits} />}
         </AnimatePresence>
       </div>
     </motion.aside>

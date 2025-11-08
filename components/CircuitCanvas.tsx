@@ -1,6 +1,6 @@
 import React, { forwardRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { PlacedGate } from '../types';
+import type { PlacedItem, PlacedGate, CustomGateDefinition } from '../types';
 import { gateMap } from '../data/gates';
 import CNOTGateIcon from './icons/CNOTGateIcon';
 import TrashIcon from './icons/TrashIcon';
@@ -12,19 +12,22 @@ import ResearchAgentIcon from './icons/ResearchAgentIcon';
 import DebuggerAgentIcon from './icons/DebuggerAgentIcon';
 import OptimizerAgentIcon from './icons/OptimizerAgentIcon';
 import PlayIcon from './icons/PlayIcon';
+import GroupIcon from './icons/GroupIcon';
 
 interface CircuitCanvasProps {
   numQubits: number;
   onNumQubitsChange: (newNumQubits: number) => void;
-  placedGates: PlacedGate[];
+  placedItems: PlacedItem[];
+  customGateDefs: CustomGateDefinition[];
   isDragging: boolean;
   onAnalyzeCircuit: () => void;
   onDebugCircuit: () => void;
   onOptimizeCircuit: () => void;
   onClear: () => void;
   onExplainGate: (gateId: string) => void;
-  selectedGateId: string | null;
-  onSelectGate: (instanceId: string) => void;
+  onGroupSelection: () => void;
+  selectedItemIds: string[];
+  onSelectItem: (instanceId: string, isShiftPressed: boolean) => void;
   visualizedQubit: number;
   setVisualizedQubit: (qubitIndex: number) => void;
   simulationStep: number | null;
@@ -35,23 +38,29 @@ const QUBIT_LINE_HEIGHT = 64; // h-16
 const GATE_WIDTH = 40; // w-10
 const GATE_HEIGHT = 40; // h-10
 
-const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedGates, isDragging, onAnalyzeCircuit, onDebugCircuit, onOptimizeCircuit, onClear, onExplainGate, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit, simulationStep, setSimulationStep }, ref) => {
+const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedItems, customGateDefs, isDragging, onAnalyzeCircuit, onDebugCircuit, onOptimizeCircuit, onClear, onExplainGate, onGroupSelection, selectedItemIds, onSelectItem, visualizedQubit, setVisualizedQubit, simulationStep, setSimulationStep }, ref) => {
   
-  const handleGateClick = (e: React.MouseEvent, instanceId: string) => {
+  const handleItemClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
-    onSelectGate(instanceId);
+    onSelectItem(instanceId, e.shiftKey);
   }
   
-  const selectedGate = useMemo(() => {
-    return placedGates.find(g => g.instanceId === selectedGateId);
-  }, [placedGates, selectedGateId]);
+  const selectedItem = useMemo(() => {
+    if (selectedItemIds.length !== 1) return null;
+    return placedItems.find(g => g.instanceId === selectedItemIds[0]);
+  }, [placedItems, selectedItemIds]);
+
+  const canGroup = useMemo(() => {
+    const selectedGates = placedItems.filter(item => selectedItemIds.includes(item.instanceId));
+    return selectedGates.length > 1 && selectedGates.every(item => 'gateId' in item);
+  }, [placedItems, selectedItemIds]);
   
-  const sortedGates = useMemo(() => [...placedGates].sort((a, b) => a.left - b.left), [placedGates]);
+  const sortedItems = useMemo(() => [...placedItems].sort((a, b) => a.left - b.left), [placedItems]);
 
   const handleStepChange = (direction: 1 | -1) => {
       if (simulationStep !== null) {
           const nextStep = simulationStep + direction;
-          if (nextStep >= 0 && nextStep <= sortedGates.length) {
+          if (nextStep >= 0 && nextStep <= sortedItems.length) {
               setSimulationStep(nextStep);
           }
       }
@@ -107,7 +116,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
                     animate={{ scaleY: 1 }}
                     exit={{ scaleY: 0 }}
                     style={{
-                        left: `calc(${sortedGates[simulationStep - 1].left}%)`,
+                        left: `calc(${sortedItems[simulationStep - 1].left}%)`,
                         height: `${numQubits * QUBIT_LINE_HEIGHT}px`
                     }}
                     transition={{ type: 'spring', stiffness: 400, damping: 30 }}
@@ -116,74 +125,131 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
         </AnimatePresence>
 
 
-        {/* Placed Gates */}
+        {/* Placed Items */}
         <AnimatePresence>
-        {placedGates.map(placedGate => {
-          const gateInfo = gateMap.get(placedGate.gateId);
-          if (!gateInfo) return null;
+        {placedItems.map(item => {
+          const isSelected = selectedItemIds.includes(item.instanceId);
 
-          const Icon = gateInfo.icon;
-          const top = (placedGate.qubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
-          const isSelected = placedGate.instanceId === selectedGateId;
+          if ('gateId' in item) {
+              const placedGate = item;
+              const gateInfo = gateMap.get(placedGate.gateId);
+              if (!gateInfo) return null;
 
-          if (gateInfo.type === 'control' && placedGate.controlQubit !== undefined) {
-            const controlY = (placedGate.controlQubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
-            
-            const containerTop = Math.min(top, controlY) - (GATE_HEIGHT / 2);
-            const containerHeight = Math.abs(top - controlY) + GATE_HEIGHT;
-            
-            const isControlTop = controlY < top;
+              const Icon = gateInfo.icon;
+              const top = (placedGate.qubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
 
-            // Target is on 'qubit', control is on 'controlQubit'
-            const targetTop = isControlTop ? (containerHeight - GATE_HEIGHT) : 0;
-            const controlTop = isControlTop ? 0 : (containerHeight - GATE_HEIGHT);
+              if (gateInfo.type === 'control' && placedGate.controlQubit !== undefined) {
+                const controlY = (placedGate.controlQubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
+                
+                const containerTop = Math.min(top, controlY) - (GATE_HEIGHT / 2);
+                const containerHeight = Math.abs(top - controlY) + GATE_HEIGHT;
+                
+                const isControlTop = controlY < top;
 
-            if (placedGate.gateId === 'swap') {
-                return (
-                     <motion.div
-                        key={placedGate.instanceId}
-                        layout
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.5 }}
-                        className="absolute z-10 cursor-pointer"
-                        style={{
-                            left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
-                            top: `${containerTop}px`,
-                            width: `${GATE_WIDTH}px`,
-                            height: `${containerHeight}px`,
-                        }}
-                        onClick={(e) => handleGateClick(e, placedGate.instanceId)}
-                    >
-                         <div className="relative w-full h-full hover:bg-cyan-500/10 rounded-lg transition-colors">
-                            <div
-                                className="absolute bg-blue-400"
-                                style={{
-                                    left: `calc(50% - 1px)`,
-                                    top: `${GATE_HEIGHT / 2}px`,
-                                    height: `${containerHeight - GATE_HEIGHT}px`,
-                                    width: '2px',
-                                }}
-                            />
-                             <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: targetTop + GATE_HEIGHT/2 - 12, width: '24px', height: '24px'}}>
-                                <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
-                            </div>
-                            <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: controlTop + GATE_HEIGHT/2 - 12, width: '24px', height: '24px'}}>
-                                <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
-                            </div>
-                            {isSelected && (
-                                <motion.div
-                                    className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
-                                    layoutId="selectionRing"
+                const targetTop = isControlTop ? (containerHeight - GATE_HEIGHT) : 0;
+                const controlTop = isControlTop ? 0 : (containerHeight - GATE_HEIGHT);
+
+                if (placedGate.gateId === 'swap') {
+                    return (
+                         <motion.div
+                            key={placedGate.instanceId}
+                            layout
+                            initial={{ opacity: 0, scale: 0.5 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.5 }}
+                            className="absolute z-10 cursor-pointer"
+                            style={{
+                                left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
+                                top: `${containerTop}px`,
+                                width: `${GATE_WIDTH}px`,
+                                height: `${containerHeight}px`,
+                            }}
+                            onClick={(e) => handleItemClick(e, placedGate.instanceId)}
+                        >
+                             <div className="relative w-full h-full hover:bg-cyan-500/10 rounded-lg transition-colors">
+                                <div
+                                    className="absolute bg-blue-400"
+                                    style={{
+                                        left: `calc(50% - 1px)`,
+                                        top: `${GATE_HEIGHT / 2}px`,
+                                        height: `${containerHeight - GATE_HEIGHT}px`,
+                                        width: '2px',
+                                    }}
                                 />
-                            )}
+                                 <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: targetTop + GATE_HEIGHT/2 - 12, width: '24px', height: '24px'}}>
+                                    <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
+                                </div>
+                                <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: controlTop + GATE_HEIGHT/2 - 12, width: '24px', height: '24px'}}>
+                                    <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
+                                </div>
+                                {isSelected && (
+                                    <motion.div
+                                        className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
+                                        layoutId={`selectionRing-${placedGate.instanceId}`}
+                                    />
+                                )}
+                            </div>
+                        </motion.div>
+                    )
+                }
+
+
+                return (
+                    <motion.div
+                      key={placedGate.instanceId}
+                      layout
+                      initial={{ opacity: 0, scale: 0.5 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.5 }}
+                      className="absolute z-10 cursor-pointer"
+                      style={{
+                        left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
+                        top: `${containerTop}px`,
+                        width: `${GATE_WIDTH}px`,
+                        height: `${containerHeight}px`,
+                      }}
+                      onClick={(e) => handleItemClick(e, placedGate.instanceId)}
+                    >
+                      <div className="relative w-full h-full hover:bg-cyan-500/10 rounded-lg transition-colors">
+                        <div
+                          className="absolute bg-blue-400"
+                          style={{
+                            left: `calc(50% - 1px)`,
+                            top: `${GATE_HEIGHT / 2}px`,
+                            height: `${containerHeight - GATE_HEIGHT}px`,
+                            width: '2px',
+                          }}
+                        />
+                        <div
+                          className="absolute w-3 h-3 bg-blue-400 rounded-full"
+                          style={{
+                            left: `calc(50% - 6px)`,
+                            top: controlTop + GATE_HEIGHT/2 - 6
+                          }}
+                        />
+                        <div
+                          className="absolute flex items-center justify-center"
+                          style={{
+                            width: `${GATE_WIDTH}px`,
+                            height: `${GATE_HEIGHT}px`,
+                            left: 0,
+                            top: targetTop,
+                          }}
+                        >
+                          {placedGate.gateId === 'cnot' ? <CNOTGateIcon className="w-8 h-8 text-blue-400"/> : <div className="w-3 h-3 bg-blue-400 rounded-full" />}
                         </div>
+                        {isSelected && (
+                          <motion.div
+                              className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
+                              layoutId={`selectionRing-${placedGate.instanceId}`}
+                            />
+                        )}
+                      </div>
                     </motion.div>
                 )
-            }
+              }
 
-
-            return (
+              return (
                 <motion.div
                   key={placedGate.instanceId}
                   layout
@@ -192,77 +258,59 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
                   exit={{ opacity: 0, scale: 0.5 }}
                   className="absolute z-10 cursor-pointer"
                   style={{
-                    left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
-                    top: `${containerTop}px`,
-                    width: `${GATE_WIDTH}px`,
-                    height: `${containerHeight}px`,
+                    left: `calc(${placedGate.left}% - 20px)`,
+                    top: `${top - 20}px`,
                   }}
-                  onClick={(e) => handleGateClick(e, placedGate.instanceId)}
+                  onClick={(e) => handleItemClick(e, placedGate.instanceId)}
                 >
-                  <div className="relative w-full h-full hover:bg-cyan-500/10 rounded-lg transition-colors">
-                    <div
-                      className="absolute bg-blue-400"
-                      style={{
-                        left: `calc(50% - 1px)`,
-                        top: `${GATE_HEIGHT / 2}px`,
-                        height: `${containerHeight - GATE_HEIGHT}px`,
-                        width: '2px',
-                      }}
-                    />
-                    <div
-                      className="absolute w-3 h-3 bg-blue-400 rounded-full"
-                      style={{
-                        left: `calc(50% - 6px)`,
-                        top: controlTop + GATE_HEIGHT/2 - 6
-                      }}
-                    />
-                    <div
-                      className="absolute flex items-center justify-center"
-                      style={{
-                        width: `${GATE_WIDTH}px`,
-                        height: `${GATE_HEIGHT}px`,
-                        left: 0,
-                        top: targetTop,
-                      }}
-                    >
-                      {placedGate.gateId === 'cnot' ? <CNOTGateIcon className="w-8 h-8 text-blue-400"/> : <div className="w-3 h-3 bg-blue-400 rounded-full" />}
-                    </div>
+                  <div className={`relative flex items-center justify-center w-10 h-10 bg-gray-900/80 backdrop-blur-sm border rounded-lg ${gateInfo.color} border-current`}>
+                    <Icon className="w-6 h-6" />
                     {isSelected && (
-                      <motion.div
+                       <motion.div
                           className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
-                          layoutId="selectionRing"
+                          layoutId={`selectionRing-${placedGate.instanceId}`}
                         />
                     )}
                   </div>
                 </motion.div>
-            )
-          }
+              )
+          } else if ('customGateId' in item) {
+              const placedCustomGate = item;
+              const def = customGateDefs.find(d => d.id === placedCustomGate.customGateId);
+              if (!def) return null;
+              
+              const maxRelativeQubit = Math.max(...def.gates.map(g => g.controlQubit ?? g.qubit), ...def.gates.map(g => g.qubit));
+              const height = (maxRelativeQubit + 1) * QUBIT_LINE_HEIGHT;
+              const top = placedCustomGate.qubit * QUBIT_LINE_HEIGHT;
 
-          return (
-            <motion.div
-              key={placedGate.instanceId}
-              layout
-              initial={{ opacity: 0, scale: 0.5 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.5 }}
-              className="absolute z-10 cursor-pointer"
-              style={{
-                left: `calc(${placedGate.left}% - 20px)`,
-                top: `${top - 20}px`,
-              }}
-              onClick={(e) => handleGateClick(e, placedGate.instanceId)}
-            >
-              <div className={`relative flex items-center justify-center w-10 h-10 bg-gray-900/80 backdrop-blur-sm border rounded-lg ${gateInfo.color} border-current`}>
-                <Icon className="w-6 h-6" />
-                {isSelected && (
+              return (
                    <motion.div
-                      className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
-                      layoutId="selectionRing"
-                    />
-                )}
-              </div>
-            </motion.div>
-          )
+                      key={placedCustomGate.instanceId}
+                      layout
+                      initial={{ opacity: 0, scale: 0.5 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.5 }}
+                      className="absolute z-10 cursor-pointer"
+                      style={{
+                        left: `calc(${placedCustomGate.left}% - 40px)`,
+                        top: `${top}px`,
+                        width: '80px',
+                        height: `${height}px`,
+                      }}
+                      onClick={(e) => handleItemClick(e, placedCustomGate.instanceId)}
+                    >
+                        <div className={`relative flex items-center justify-center w-full h-full bg-gray-800/80 backdrop-blur-sm border-2 rounded-lg ${def.color} border-current`}>
+                            <span className="text-xs font-mono font-semibold tracking-wider">{def.name}</span>
+                            {isSelected && (
+                            <motion.div
+                                className="absolute -inset-2 rounded-lg border-2 border-cyan-400"
+                                layoutId={`selectionRing-${placedCustomGate.instanceId}`}
+                                />
+                            )}
+                        </div>
+                    </motion.div>
+              )
+          }
         })}
         </AnimatePresence>
       </div>
@@ -282,17 +330,29 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
       
       <div className="absolute top-2 right-4 flex items-center gap-2">
          <AnimatePresence>
-          {selectedGate && (
+          {selectedItem && 'gateId' in selectedItem && (
             <motion.button
               initial={{ opacity: 0, width: 0 }}
               animate={{ opacity: 1, width: 'auto' }}
               exit={{ opacity: 0, width: 0 }}
-              onClick={() => onExplainGate(selectedGate.gateId)}
+              onClick={() => onExplainGate(selectedItem.gateId)}
               className="group flex items-center gap-2 text-xs font-mono bg-purple-500/20 text-purple-300 px-3 py-1.5 rounded-md hover:bg-purple-500/30 hover:text-purple-200 transition-all overflow-hidden whitespace-nowrap"
             >
               <ExplanationAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity flex-shrink-0" />
               <span className="flex-shrink-0">Explain Gate</span>
             </motion.button>
+          )}
+          {canGroup && (
+               <motion.button
+                  initial={{ opacity: 0, width: 0 }}
+                  animate={{ opacity: 1, width: 'auto' }}
+                  exit={{ opacity: 0, width: 0 }}
+                  onClick={onGroupSelection}
+                  className="group flex items-center gap-2 text-xs font-mono bg-orange-500/20 text-orange-300 px-3 py-1.5 rounded-md hover:bg-orange-500/30 hover:text-orange-200 transition-all overflow-hidden whitespace-nowrap"
+                >
+                  <GroupIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                  <span className="flex-shrink-0">Group</span>
+                </motion.button>
           )}
         </AnimatePresence>
          <button 
@@ -329,6 +389,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
        <div className="absolute bottom-4 left-4 text-xs text-gray-600 font-['IBM_Plex_Mono']">
          Click a gate to select, then press{' '}
          <kbd className="px-1.5 py-0.5 border border-gray-700 rounded-md bg-gray-800">Delete</kbd> to remove.
+         Hold <kbd className="px-1.5 py-0.5 border border-gray-700 rounded-md bg-gray-800">Shift</kbd> to select multiple.
       </div>
 
       <AnimatePresence>
@@ -340,13 +401,13 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
                 className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-gray-900/80 backdrop-blur-sm border border-gray-500/30 rounded-lg p-2 font-mono text-xs z-30"
             >
                 <button onClick={() => handleStepChange(-1)} disabled={simulationStep === 0} className="px-2 py-1 rounded hover:bg-gray-700 disabled:opacity-30">Back</button>
-                <span>Step {simulationStep} of {sortedGates.length}</span>
-                <button onClick={() => handleStepChange(1)} disabled={simulationStep === sortedGates.length} className="px-2 py-1 rounded hover:bg-gray-700 disabled:opacity-30">Next</button>
+                <span>Step {simulationStep} of {sortedItems.length}</span>
+                <button onClick={() => handleStepChange(1)} disabled={simulationStep === sortedItems.length} className="px-2 py-1 rounded hover:bg-gray-700 disabled:opacity-30">Next</button>
                 <div className="w-px h-4 bg-gray-600/50 mx-1"></div>
                 <button onClick={() => setSimulationStep(null)} className="px-2 py-1 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30">Exit</button>
             </motion.div>
         )}
-        {simulationStep === null && placedGates.length > 0 && (
+        {simulationStep === null && placedItems.length > 0 && (
              <motion.div
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}

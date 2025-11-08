@@ -1,6 +1,7 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Content, Part } from "@google/genai";
-import type { AIResponse, AgentStatusUpdate, PlacedGate, AIAction, Message, SimulationResult, Source, AddGatePayload } from "../types";
+import type { AIResponse, AgentStatusUpdate, PlacedGate, AIAction, Message, SimulationResult, Source, AddGatePayload, PlacedItem, CustomGateDefinition } from "../types";
 import { gateMap, gates } from "../data/gates";
+import { unrollCircuit } from "./quantumSimulator";
 
 const API_KEY = process.env.API_KEY;
 if (!API_KEY) {
@@ -477,11 +478,14 @@ export const getTutorResponse = async (
 const qiskitMethodMap: Record<string, (g: PlacedGate) => string | null> = { 'h': g => `qc.h(${g.qubit})`, 'x': g => `qc.x(${g.qubit})`, 'y': g => `qc.y(${g.qubit})`, 'z': g => `qc.z(${g.qubit})`, 's': g => `qc.s(${g.qubit})`, 'sdg': g => `qc.sdg(${g.qubit})`, 't': g => `qc.t(${g.qubit})`, 'tdg': g => `qc.tdg(${g.qubit})`, 'cnot': g => g.controlQubit !== undefined ? `qc.cx(${g.controlQubit}, ${g.qubit})` : null, 'cz': g => g.controlQubit !== undefined ? `qc.cz(${g.controlQubit}, ${g.qubit})` : null, 'swap': g => g.controlQubit !== undefined ? `qc.swap(${g.qubit}, ${g.controlQubit})` : null, 'measure': g => `qc.measure(${g.qubit}, ${g.qubit})`, };
 const methodNames = Object.keys(qiskitMethodMap).join('|').replace('cnot', 'cx');
 
-export const generateQiskitCode = (placedGates: PlacedGate[], numQubits: number): string => {
-    const sortedGates = [...placedGates].sort((a, b) => a.left - b.left);
+export const generateQiskitCode = (placedItems: PlacedItem[], customGateDefs: CustomGateDefinition[], numQubits: number): string => {
+    const unrolledGates = unrollCircuit(placedItems, customGateDefs);
+    const sortedGates = unrolledGates.sort((a, b) => a.left - b.left);
+
     let code = `from qiskit import QuantumCircuit\n\n`;
     code += `# Create a quantum circuit with ${numQubits} qubits\n`;
     code += `qc = QuantumCircuit(${numQubits})\n\n`;
+
     if (sortedGates.length > 0) code += `# Add gates to the circuit\n`;
     for (const gate of sortedGates) {
         const generator = qiskitMethodMap[gate.gateId];

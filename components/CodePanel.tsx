@@ -1,20 +1,21 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import type { PlacedGate } from '../types';
+import type { PlacedItem, CustomGateDefinition } from '../types';
 import { generateQiskitCode } from '../services/geminiService';
 import LogoIcon from './icons/LogoIcon';
 import CopyIcon from './icons/CopyIcon';
 
 interface CodePanelProps {
-  placedGates: PlacedGate[];
+  placedItems: PlacedItem[];
+  customGateDefs: CustomGateDefinition[];
   numQubits: number;
 }
 
-const CodePanel: React.FC<CodePanelProps> = ({ placedGates, numQubits }) => {
+const CodePanel: React.FC<CodePanelProps> = ({ placedItems, customGateDefs, numQubits }) => {
   const [hasCopied, setHasCopied] = useState(false);
   
-  const rawCode = useMemo(() => generateQiskitCode(placedGates, numQubits).replace(/<span.*?>|<\/span>/g, ''), [placedGates, numQubits]);
-  const highlightedCode = useMemo(() => generateQiskitCode(placedGates, numQubits), [placedGates, numQubits]);
+  const rawCode = useMemo(() => generateQiskitCode(placedItems, customGateDefs, numQubits).replace(/<span.*?>|<\/span>/g, ''), [placedItems, customGateDefs, numQubits]);
+  const highlightedCode = useMemo(() => generateQiskitCode(placedItems, customGateDefs, numQubits), [placedItems, customGateDefs, numQubits]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(rawCode);
@@ -34,7 +35,7 @@ const CodePanel: React.FC<CodePanelProps> = ({ placedGates, numQubits }) => {
     >
       <div className="flex justify-between items-center p-1 text-xs text-gray-400 border-b border-gray-500/20 mb-2">
         <span>Qiskit (Python)</span>
-        {placedGates.length > 0 && (
+        {placedItems.length > 0 && (
           <button 
             onClick={handleCopy}
             className="flex items-center gap-1.5 text-gray-400 hover:text-white px-2 py-0.5 rounded-md hover:bg-gray-700/50 transition-colors"
@@ -44,7 +45,7 @@ const CodePanel: React.FC<CodePanelProps> = ({ placedGates, numQubits }) => {
           </button>
         )}
       </div>
-      {placedGates.length === 0 ? (
+      {placedItems.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
             <LogoIcon className="w-16 h-16 text-gray-700 mb-4" />
             <p className="max-w-xs mt-1 text-sm">Your circuit's code will appear here.</p>

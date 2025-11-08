@@ -16,12 +16,35 @@ export interface PlacedGate {
   qubit: number; // Target qubit
   controlQubit?: number; // Control qubit for multi-qubit gates
   left: number; // Percentage position from left
+  // FIX: Add isSelected property to allow destructuring in App.tsx and geminiService.ts
   isSelected?: boolean;
 }
 
+export interface CustomGateDefinition {
+  id: string;
+  name: string;
+  color: string;
+  // FIX: Omit isSelected from gates within a definition, as they don't have a selection state.
+  gates: Omit<PlacedGate, 'instanceId' | 'isSelected'>[]; // Relative gate positions
+}
+
+export interface PlacedCustomGate {
+    instanceId: string;
+    customGateId: string;
+    qubit: number; // Top-most qubit
+    left: number;
+    // FIX: Add isSelected property for consistency with PlacedGate.
+    isSelected?: boolean;
+}
+
+// FIX: Simplify PlacedItem as its constituents now have the optional isSelected property.
+export type PlacedItem = PlacedGate | PlacedCustomGate;
+
+
 export interface CircuitState {
-  placedGates: PlacedGate[];
+  placedItems: PlacedItem[];
   numQubits: number;
+  customGateDefinitions: CustomGateDefinition[];
 }
 
 
