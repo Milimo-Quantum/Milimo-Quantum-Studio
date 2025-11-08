@@ -43,30 +43,22 @@ ${gateLibrary}
 ${sotaConceptsLibrary}
 
 **Core Directives:**
-1.  **Prioritize the Ideal Solution:** First, determine the best, most advanced, and most appropriate circuit for the user's request, referencing the SOTA library. THEN, formulate a plan to either build it directly if it fits, or adapt the canvas first if necessary.
-2.  **Analyze Intent & Complexity:** Infer the user's true goal. If they use words like "advanced," "SOTA," or "robust," you MUST formulate a plan that delivers a sophisticated result. A request for "advanced spacecraft communication" MUST NOT result in a basic GHZ state or 3-qubit bit-flip code.
-3.  **Handle Analysis Requests:** If the user asks to "analyze the current circuit", your output plan MUST be an empty array: \`[]\`. The Explanation agent will automatically handle the analysis based on the current circuit state.
-4.  **Mandatory Quality Assurance:** For any abstract or complex request that requires research to build a new circuit, your plan MUST include a 'Critic' step immediately after the 'Research' step. The Critic's job is to prevent "lazy" solutions.
-5.  **Formulate the Plan:** Your output MUST be a single JSON object containing a "plan" array.
+1.  **Analyze User Intent:**
+    - **Build/Research:** If the user asks to build, create, or show something new, formulate a research-critic-design plan.
+    - **Analyze:** If the user asks to "analyze the current circuit", your output plan MUST be an empty array: \`[]\`. The Explanation agent will handle this.
+    - **Debug:** If the user asks to "debug" or "fix" the circuit, create a plan with a single "Debugger" step.
+2.  **Prioritize the Ideal Solution:** For build requests, determine the best, most advanced circuit. Formulate a plan to build it directly if it fits, or adapt the canvas first if necessary.
+3.  **Mandatory Quality Assurance:** For any abstract or complex request that requires research to build a new circuit, your plan MUST include a 'Critic' step immediately after the 'Research' step.
+4.  **Formulate the Plan:** Your output MUST be a single JSON object containing a "plan" array.
 
-**Example: Advanced Request**
-*User Prompt:* "build a circuit for the 5-qubit error correcting code"
+**Example: Debug Request**
+*User Prompt:* "fix this circuit, it's not working"
 *Your JSON Output:*
 {
   "plan": [
     {
-      "agent_to_call": "Research",
-      "reasoning": "The user has requested a specific, advanced algorithm from the SOTA library. I need to get its precise gate layout.",
-      "prompt": "Provide the specific gate sequence for the encoding circuit of the 5-qubit perfect error correcting code. Confirm it requires 5 qubits."
-    },
-    {
-      "agent_to_call": "Critic",
-      "reasoning": "The Critic will verify that the research is accurate and will formulate a precise, multi-step prompt for the Design agent, including changing the canvas size.",
-      "prompt": ""
-    },
-    {
-      "agent_to_call": "Design",
-      "reasoning": "The Design agent will construct the circuit for the protocol approved by the Critic.",
+      "agent_to_call": "Debugger",
+      "reasoning": "The user wants to fix the current circuit. I will deploy the Debugger agent to analyze it and propose a correction.",
       "prompt": ""
     }
   ]
@@ -80,7 +72,7 @@ const managerSchema = {
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    agent_to_call: { type: Type.STRING, enum: ['Research', 'Critic', 'Design', 'Explanation'] },
+                    agent_to_call: { type: Type.STRING, enum: ['Research', 'Critic', 'Design', 'Explanation', 'Debugger'] },
                     reasoning: { type: Type.STRING },
                     prompt: { type: Type.STRING },
                 },
@@ -104,17 +96,7 @@ ${sotaConceptsLibrary}
 3.  **Manage Canvas Resources:** If the best-researched option requires a different number of qubits, your 'refined_prompt' for the Design Agent MUST begin with the instruction to change the qubit count using the 'set_qubit_count' tool.
 4.  **Provide Actionable Feedback:** Your output MUST be a JSON object.
     - If you approve, it must contain \`is_approved: true\`, \`reasoning\`, and a \`refined_prompt\` for the Design Agent.
-    - If you reject, it must contain \`is_approved: false\`, \`reasoning\`, and a \`rejection_prompt\` that tells the Research agent what to look for instead (e.g., "Find the circuit for the 5-qubit perfect error-correcting code.").
-
-**Example: Rejection**
-*User Request:* "show me a more advanced circuit"
-*Research Finding:* "The 3-qubit bit-flip code..."
-*Your JSON Output:*
-{
-  "is_approved": false,
-  "reasoning": "The user requested a more advanced circuit. The 3-qubit bit-flip code is a foundational concept, not a significant step up in complexity. Rejecting this lazy solution.",
-  "rejection_prompt": "Research the 5-qubit perfect error-correcting code, which is a true SOTA example and fits within the canvas limits."
-}`;
+    - If you reject, it must contain \`is_approved: false\`, \`reasoning\`, and a \`rejection_prompt\` that tells the Research agent what to look for instead (e.g., "Find the circuit for the 5-qubit perfect error-correcting code.").`;
 
 const criticSchema = {
     type: Type.OBJECT,
@@ -142,6 +124,25 @@ ${gateLibrary}
 **Core Directive:**
 - **EXECUTE PRECISELY:** Your task has been vetted. Do not deviate. You MUST construct the circuit exactly as described in the prompt using the available tools.
 - **PRIORITIZE 'replace_circuit'**: For building entire new states from scratch, 'replace_circuit' is preferred to ensure a clean canvas, especially after changing the qubit count.`;
+
+const debuggerAgentSystemInstruction = (circuitDescription: string) => `You are the Debugger Agent for Milimo AI, a quantum circuit expert. Your job is to analyze a user's potentially faulty circuit, identify logical errors, and provide a corrected version.
+
+**Current Circuit State:**
+${circuitDescription}
+
+**Common Quantum Circuit Errors:**
+- **Incorrect Bell State:** A Bell state requires a Hadamard gate on one qubit, followed by a CNOT. A common error is missing the Hadamard or using a different gate.
+- **GHZ State Malformation:** A GHZ state starts with a Hadamard on one qubit, followed by a chain of CNOTs. Errors include incorrect CNOT direction or missing the initial Hadamard.
+- **Incomplete Teleportation:** The teleportation protocol has a specific structure (Bell pair creation, CNOT, H, measurement, classical correction). Missing any of these steps will cause it to fail.
+- **Misplaced Measurement:** Measuring a qubit too early can collapse the superposition needed for subsequent gates to work correctly.
+
+**Your Task:**
+1.  **Analyze:** Carefully examine the provided circuit state.
+2.  **Diagnose:** Compare it against known algorithms and principles. If you find a logical error, state clearly what the error is and why it's a problem.
+3.  **Correct:** Use the \`replace_circuit\` tool to provide the full, corrected circuit. If the circuit is not a known algorithm or has no obvious errors, state that you can't find a specific flaw.
+4.  **Explain:** After calling the tool, provide a brief, user-facing explanation of the fix.
+`;
+
 
 const explanationAgentSystemInstruction = `You are the Explanation Agent for Milimo AI. Your job is to provide a final, user-facing response that synthesizes the entire problem-solving journey using a strict analytical process.
 
@@ -189,7 +190,33 @@ export const getAgentResponse = async (
         designPrompt: '',
         designActions: [] as AIAction[],
         sources: undefined as Source[] | undefined,
+        explanationText: '',
     };
+    
+    const debuggerStep = plan.find((step: any) => step.agent_to_call === 'Debugger');
+    if (debuggerStep) {
+        onStatusUpdate({ agent: 'Debugger', status: 'running', message: debuggerStep.reasoning });
+        const debuggerResponse = await ai.models.generateContent({
+            model,
+            contents: [{ role: 'user', parts: [{ text: `User wants to debug this circuit. Please analyze and respond.` }] }],
+            config: { tools: [{ functionDeclarations: [replaceCircuitTool] }], systemInstruction: debuggerAgentSystemInstruction(circuitDescriptionForManager) },
+        });
+
+        if (debuggerResponse.functionCalls && debuggerResponse.functionCalls.length > 0) {
+            const replaceCall = debuggerResponse.functionCalls.find(fc => fc.name === 'replace_circuit');
+            if (replaceCall) {
+                executionContext.designActions.push({ type: 'replace_circuit', payload: (replaceCall.args as any).gates });
+            }
+        }
+        executionContext.explanationText = debuggerResponse.text; // The debugger's explanation is the final text
+        onStatusUpdate({ agent: 'Debugger', status: 'completed', message: 'Debug analysis complete.' });
+        return { 
+            displayText: executionContext.explanationText, 
+            actions: executionContext.designActions,
+            sources: executionContext.sources 
+        };
+    }
+
 
     const researchStep = plan.find((step: any) => step.agent_to_call === 'Research');
     if (researchStep) {
@@ -289,17 +316,10 @@ export const getAgentResponse = async (
         onStatusUpdate({ agent: 'Design', status: 'completed', message: 'Circuit constructed.' });
     }
 
-
     // --- Final State Snapshot Calculation ---
-    // This is the critical fix: determine the *actual* final state of the canvas *before* sending to the explanation agent.
     let finalNumQubits = numQubits;
     let finalGates: Omit<PlacedGate, 'instanceId' | 'isSelected'>[] = currentCircuit.map(({ instanceId, isSelected, ...rest }) => rest);
 
-    // Create a temporary state based on the current circuit
-    const initialAction: AIAction | null = plan.length > 0 ? { type: 'replace_circuit', payload: [] } : null; // If a plan exists, we assume we start fresh unless adding
-    const actionsToSimulate = initialAction ? [initialAction, ...executionContext.designActions] : executionContext.designActions;
-
-    // Simulate actions to get the final state
     if (plan.length > 0) { // Only modify the circuit if there was a plan to do so. Handles "analyze" requests.
         let tempGatesState: Omit<PlacedGate, 'instanceId' | 'isSelected'>[] = [];
         let tempQubitState = numQubits;
@@ -312,9 +332,12 @@ export const getAgentResponse = async (
         const replaceAction = executionContext.designActions.find(a => a.type === 'replace_circuit');
         if (replaceAction && replaceAction.type === 'replace_circuit') {
             tempGatesState = replaceAction.payload;
-        } else {
+        } else if (setQubitAction) {
             const addActions = executionContext.designActions.filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate');
             tempGatesState = addActions.map(a => a.payload);
+        } else {
+             const addActions = executionContext.designActions.filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate');
+             tempGatesState = [...finalGates, ...addActions.map(a => a.payload)];
         }
 
         finalNumQubits = tempQubitState;
@@ -333,7 +356,7 @@ export const getAgentResponse = async (
     };
 
 
-    // 4. Explanation Agent
+    // Explanation Agent
     onStatusUpdate({ agent: 'Explanation', status: 'running', message: 'Synthesizing final response...' });
     const explanationContext = `Synthesize the following information into a single, cohesive, user-facing response.
     - User's original prompt: "${executionContext.userPrompt}"

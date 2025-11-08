@@ -6,6 +6,7 @@ import DesignAgentIcon from './icons/DesignAgentIcon';
 import ExplanationAgentIcon from './icons/ExplanationAgentIcon';
 import ResearchAgentIcon from './icons/ResearchAgentIcon';
 import CriticAgentIcon from './icons/CriticAgentIcon';
+import DebuggerAgentIcon from './icons/DebuggerAgentIcon';
 
 interface AgentStatusDisplayProps {
   updates: AgentStatusUpdate[];
@@ -17,6 +18,7 @@ const agentIcons = {
   Critic: CriticAgentIcon,
   Design: DesignAgentIcon,
   Explanation: ExplanationAgentIcon,
+  Debugger: DebuggerAgentIcon,
 };
 
 const AgentStatusDisplay: React.FC<AgentStatusDisplayProps> = ({ updates }) => {

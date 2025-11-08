@@ -9,6 +9,8 @@ import ExplanationAgentIcon from './icons/ExplanationAgentIcon';
 import PlusIcon from './icons/PlusIcon';
 import MinusIcon from './icons/MinusIcon';
 import ResearchAgentIcon from './icons/ResearchAgentIcon';
+import DebuggerAgentIcon from './icons/DebuggerAgentIcon';
+import PlayIcon from './icons/PlayIcon';
 
 interface CircuitCanvasProps {
   numQubits: number;
@@ -16,19 +18,22 @@ interface CircuitCanvasProps {
   placedGates: PlacedGate[];
   isDragging: boolean;
   onAnalyzeCircuit: () => void;
+  onDebugCircuit: () => void;
   onClear: () => void;
   onExplainGate: (gateId: string) => void;
   selectedGateId: string | null;
   onSelectGate: (instanceId: string) => void;
   visualizedQubit: number;
   setVisualizedQubit: (qubitIndex: number) => void;
+  simulationStep: number | null;
+  setSimulationStep: (step: number | null) => void;
 }
 
 const QUBIT_LINE_HEIGHT = 64; // h-16
 const GATE_WIDTH = 40; // w-10
 const GATE_HEIGHT = 40; // h-10
 
-const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedGates, isDragging, onAnalyzeCircuit, onClear, onExplainGate, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit }, ref) => {
+const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedGates, isDragging, onAnalyzeCircuit, onDebugCircuit, onClear, onExplainGate, selectedGateId, onSelectGate, visualizedQubit, setVisualizedQubit, simulationStep, setSimulationStep }, ref) => {
   
   const handleGateClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
@@ -38,6 +43,17 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
   const selectedGate = useMemo(() => {
     return placedGates.find(g => g.instanceId === selectedGateId);
   }, [placedGates, selectedGateId]);
+  
+  const sortedGates = useMemo(() => [...placedGates].sort((a, b) => a.left - b.left), [placedGates]);
+
+  const handleStepChange = (direction: 1 | -1) => {
+      if (simulationStep !== null) {
+          const nextStep = simulationStep + direction;
+          if (nextStep >= 0 && nextStep <= sortedGates.length) {
+              setSimulationStep(nextStep);
+          }
+      }
+  };
 
 
   return (
@@ -79,6 +95,24 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
             )}
             </div>
         ))}
+
+        {/* Simulation Step Indicator */}
+        <AnimatePresence>
+            {simulationStep !== null && simulationStep > 0 && (
+                <motion.div
+                    className="absolute top-0 h-full w-0.5 bg-purple-400 z-20"
+                    initial={{ scaleY: 0 }}
+                    animate={{ scaleY: 1 }}
+                    exit={{ scaleY: 0 }}
+                    style={{
+                        left: `calc(${sortedGates[simulationStep - 1].left}%)`,
+                        height: `${numQubits * QUBIT_LINE_HEIGHT}px`
+                    }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                />
+            )}
+        </AnimatePresence>
+
 
         {/* Placed Gates */}
         <AnimatePresence>
@@ -228,7 +262,6 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
             </motion.div>
           )
         })}
-        {/* FIX: Corrected typo from AnatePresence to AnimatePresence */}
         </AnimatePresence>
       </div>
       
@@ -269,6 +302,13 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
           Clear
         </button>
         <button 
+          onClick={onDebugCircuit}
+          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-yellow-500/20 hover:text-yellow-300 transition-all"
+        >
+          <DebuggerAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
+          Debug Circuit
+        </button>
+        <button 
           onClick={onAnalyzeCircuit}
           className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-cyan-500/20 hover:text-cyan-300 transition-all"
         >
@@ -277,10 +317,41 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
         </button>
       </div>
 
-       <div className="absolute bottom-4 right-4 text-xs text-gray-600 font-['IBM_Plex_Mono']">
+       <div className="absolute bottom-4 left-4 text-xs text-gray-600 font-['IBM_Plex_Mono']">
          Click a gate to select, then press{' '}
          <kbd className="px-1.5 py-0.5 border border-gray-700 rounded-md bg-gray-800">Delete</kbd> to remove.
       </div>
+
+      <AnimatePresence>
+        {simulationStep !== null && (
+            <motion.div
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 20, opacity: 0 }}
+                className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-gray-900/80 backdrop-blur-sm border border-gray-500/30 rounded-lg p-2 font-mono text-xs z-30"
+            >
+                <button onClick={() => handleStepChange(-1)} disabled={simulationStep === 0} className="px-2 py-1 rounded hover:bg-gray-700 disabled:opacity-30">Back</button>
+                <span>Step {simulationStep} of {sortedGates.length}</span>
+                <button onClick={() => handleStepChange(1)} disabled={simulationStep === sortedGates.length} className="px-2 py-1 rounded hover:bg-gray-700 disabled:opacity-30">Next</button>
+                <div className="w-px h-4 bg-gray-600/50 mx-1"></div>
+                <button onClick={() => setSimulationStep(null)} className="px-2 py-1 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30">Exit</button>
+            </motion.div>
+        )}
+        {simulationStep === null && placedGates.length > 0 && (
+             <motion.div
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 20, opacity: 0 }}
+                className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30"
+            >
+                <button onClick={() => setSimulationStep(0)} className="flex items-center gap-2 text-xs font-mono bg-purple-500/20 text-purple-300 px-3 py-1.5 rounded-md hover:bg-purple-500/30 hover:text-purple-200 transition-all">
+                    <PlayIcon className="w-3 h-3"/>
+                    Step-Through Simulation
+                </button>
+            </motion.div>
+        )}
+      </AnimatePresence>
+
     </motion.div>
   );
 });

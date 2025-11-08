@@ -3,22 +3,38 @@ import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import CircuitCanvas from './components/CircuitCanvas';
 import RightPanel from './components/RightPanel';
-import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload } from './types';
+import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
 import { getAgentResponse } from './services/geminiService';
 import { simulate } from './services/quantumSimulator';
 import { gateMap } from './data/gates';
+import { useHistory } from './hooks/useHistory';
+
+const INITIAL_STATE: CircuitState = {
+  numQubits: 3,
+  placedGates: [],
+};
 
 export const App: React.FC = () => {
-  const [numQubits, setNumQubits] = useState(3);
-  const [placedGates, setPlacedGates] = useState<PlacedGate[]>([]);
+  const { 
+    state, 
+    setState, 
+    undo, 
+    redo, 
+    canUndo, 
+    canRedo 
+  } = useHistory<CircuitState>(INITIAL_STATE);
+
+  const { numQubits, placedGates } = state;
+
   const [selectedGateId, setSelectedGateId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [draggingGate, setDraggingGate] = useState<{gate: QuantumGate, point: {x: number, y: number}} | null>(null);
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [activeTab, setActiveTab] = useState<'copilot' | 'visualization' | 'code'>('copilot');
   const [visualizedQubit, setVisualizedQubit] = useState<number>(0);
+  const [simulationStep, setSimulationStep] = useState<number | null>(null);
   
   const [messages, setMessages] = useState<Message[]>([
     { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. I can research and build advanced quantum circuits from scratch. Challenge me with a concept like 'quantum error correction' or 'the BB84 protocol'." },
@@ -28,11 +44,16 @@ export const App: React.FC = () => {
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragInfoRef = useRef<{ gate: QuantumGate | null }>({ gate: null });
 
-  // --- Live Simulation Engine ---
+  // --- Live & Stepped Simulation Engine ---
   useEffect(() => {
-    const result = simulate(placedGates, numQubits);
+    let gatesForSimulation = placedGates;
+    if (simulationStep !== null) {
+      const sortedGates = [...placedGates].sort((a, b) => a.left - b.left);
+      gatesForSimulation = sortedGates.slice(0, simulationStep);
+    }
+    const result = simulate(gatesForSimulation, numQubits);
     setSimulationResult(result);
-  }, [placedGates, numQubits]);
+  }, [placedGates, numQubits, simulationStep]);
 
   // --- Gate Selection & Deletion ---
   const handleSelectGate = (instanceId: string) => {
@@ -42,24 +63,42 @@ export const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.key === 'Backspace' || event.key === 'Delete') && selectedGateId) {
-        setPlacedGates(prev => prev.filter(g => g.instanceId !== selectedGateId));
+        setState({
+          ...state,
+          placedGates: state.placedGates.filter(g => g.instanceId !== selectedGateId)
+        });
         setSelectedGateId(null);
+      }
+       // Undo/Redo shortcuts
+      if ((event.metaKey || event.ctrlKey) && event.key === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === 'y') {
+        event.preventDefault();
+        redo();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedGateId]);
+  }, [selectedGateId, state, setState, undo, redo]);
 
   const handleNumQubitsChange = useCallback((newNumQubits: number) => {
     if (newNumQubits >= 2 && newNumQubits <= 5) {
-      setNumQubits(newNumQubits);
-      setPlacedGates([]); // Clear circuit to prevent invalid gate placements
+      setState({
+        numQubits: newNumQubits,
+        placedGates: [] // Clear circuit on qubit change
+      });
       setSelectedGateId(null);
       if (visualizedQubit >= newNumQubits) {
         setVisualizedQubit(0);
       }
     }
-  }, [visualizedQubit]);
+  }, [visualizedQubit, setState]);
 
 
   const executeActions = useCallback((actions: AIAction[]) => {
@@ -115,9 +154,11 @@ export const App: React.FC = () => {
         console.warn("Some gates were discarded by the validator as they were invalid for the final qubit count.");
     }
     
-    // 4. Atomically apply the final state to React.
-    setNumQubits(finalNumQubits);
-    setPlacedGates(validatedPlacedGates);
+    // 4. Atomically apply the final state to React history.
+    setState({
+        numQubits: finalNumQubits,
+        placedGates: validatedPlacedGates,
+    });
     setSelectedGateId(null);
 
     // Update visualizedQubit if it's now out of bounds.
@@ -130,12 +171,13 @@ export const App: React.FC = () => {
         setActiveTab('code');
     }
 
-  }, [numQubits, placedGates, visualizedQubit, setVisualizedQubit, setActiveTab]);
+  }, [numQubits, placedGates, visualizedQubit, setVisualizedQubit, setActiveTab, setState]);
 
 
   const handleSend = useCallback(async (prompt: string) => {
     if (prompt.trim() === '' || isAiLoading) return;
     setSelectedGateId(null);
+    setSimulationStep(null); // Exit step-through mode when interacting with AI
 
     const userMessage: Message = { type: 'text', sender: 'user', text: prompt };
     const allMessages = [...messages, userMessage];
@@ -188,10 +230,15 @@ export const App: React.FC = () => {
     handleSend("Analyze my current circuit. Identify its purpose if it's a known algorithm or state, explain the principles behind it, and propose potential next steps or interesting modifications.");
   }, [handleSend]);
   
+  const handleDebugCircuit = useCallback(() => {
+      handleSend("Debug my current circuit. Identify any logical errors or common mistakes for known algorithms. Explain the issue and, if possible, provide a corrected version of the circuit.");
+  }, [handleSend]);
+
   const handleClearCircuit = useCallback(() => {
-    setPlacedGates([]);
+    setState({ ...state, placedGates: [] });
     setSelectedGateId(null);
-  }, []);
+    setSimulationStep(null);
+  }, [state, setState]);
 
   const handleShowVisualization = useCallback(() => {
     setActiveTab('visualization');
@@ -248,7 +295,7 @@ export const App: React.FC = () => {
         }
       }
 
-      setPlacedGates(prev => [...prev, newGate]);
+      setState({ ...state, placedGates: [...state.placedGates, newGate] });
     }
   };
   
@@ -276,6 +323,26 @@ export const App: React.FC = () => {
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
   };
+  
+  const handleSave = useCallback(() => {
+    localStorage.setItem('milimo_quantum_circuit', JSON.stringify(state));
+    // Add a visual confirmation if desired
+  }, [state]);
+
+  const handleLoad = useCallback(() => {
+    const savedState = localStorage.getItem('milimo_quantum_circuit');
+    if (savedState) {
+        try {
+            const parsedState = JSON.parse(savedState);
+            // Basic validation
+            if (typeof parsedState.numQubits === 'number' && Array.isArray(parsedState.placedGates)) {
+                setState(parsedState, true); // true to overwrite history
+            }
+        } catch (e) {
+            console.error("Failed to load circuit from storage", e);
+        }
+    }
+  }, [setState]);
 
   return (
     <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => setSelectedGateId(null)}>
@@ -285,7 +352,15 @@ export const App: React.FC = () => {
       </div>
       
       <div className="relative z-10 flex flex-col flex-grow">
-        <Header onShowVisualization={handleShowVisualization} />
+        <Header 
+            onShowVisualization={handleShowVisualization}
+            onUndo={undo}
+            onRedo={redo}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onSave={handleSave}
+            onLoad={handleLoad}
+        />
          <div className="px-4 pt-2">
             <span className="text-xs font-mono bg-gray-700/50 text-gray-400 px-2 py-0.5 rounded">Preview</span>
         </div>
@@ -299,12 +374,15 @@ export const App: React.FC = () => {
               placedGates={placedGates} 
               isDragging={isDragging} 
               onAnalyzeCircuit={handleAnalyzeCircuit}
+              onDebugCircuit={handleDebugCircuit}
               onClear={handleClearCircuit}
               onExplainGate={handleExplainGate}
               selectedGateId={selectedGateId}
               onSelectGate={handleSelectGate}
               visualizedQubit={visualizedQubit}
               setVisualizedQubit={setVisualizedQubit}
+              simulationStep={simulationStep}
+              setSimulationStep={setSimulationStep}
             />
           </div>
           <RightPanel 

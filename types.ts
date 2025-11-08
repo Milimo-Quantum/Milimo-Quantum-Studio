@@ -19,8 +19,14 @@ export interface PlacedGate {
   isSelected?: boolean;
 }
 
+export interface CircuitState {
+  placedGates: PlacedGate[];
+  numQubits: number;
+}
+
+
 // Agent-related Types
-export type AgentName = 'Manager' | 'Research' | 'Critic' | 'Design' | 'Explanation';
+export type AgentName = 'Manager' | 'Research' | 'Critic' | 'Design' | 'Explanation' | 'Debugger';
 export type AgentStatus = 'running' | 'completed';
 
 export interface AgentStatusUpdate {

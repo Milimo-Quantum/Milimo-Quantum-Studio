@@ -2,12 +2,22 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import LogoIcon from './icons/LogoIcon';
 import PlayIcon from './icons/PlayIcon';
+import UndoIcon from './icons/UndoIcon';
+import RedoIcon from './icons/RedoIcon';
+import SaveIcon from './icons/SaveIcon';
+import LoadIcon from './icons/LoadIcon';
 
 interface HeaderProps {
   onShowVisualization: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onSave: () => void;
+  onLoad: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ onShowVisualization }) => {
+const Header: React.FC<HeaderProps> = ({ onShowVisualization, onUndo, onRedo, canUndo, canRedo, onSave, onLoad }) => {
   return (
     <motion.header
       initial={{ y: -100, opacity: 0 }}
@@ -21,6 +31,23 @@ const Header: React.FC<HeaderProps> = ({ onShowVisualization }) => {
           Milimo <span className="text-cyan-400">Quantum Studio</span>
         </h1>
       </div>
+
+      <div className="flex items-center gap-2">
+         <button onClick={onSave} className="group flex items-center gap-1.5 px-3 py-1.5 text-gray-400 hover:text-white rounded-md hover:bg-gray-700/50 transition-colors" title="Save Circuit (Ctrl+S)">
+            <SaveIcon className="w-4 h-4" />
+        </button>
+        <button onClick={onLoad} className="group flex items-center gap-1.5 px-3 py-1.5 text-gray-400 hover:text-white rounded-md hover:bg-gray-700/50 transition-colors" title="Load Circuit (Ctrl+L)">
+            <LoadIcon className="w-4 h-4" />
+        </button>
+        <div className="w-px h-5 bg-gray-600/50 mx-1"></div>
+        <button onClick={onUndo} disabled={!canUndo} className="group flex items-center gap-1.5 px-3 py-1.5 text-gray-400 hover:text-white rounded-md hover:bg-gray-700/50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed" title="Undo (Ctrl+Z)">
+            <UndoIcon className="w-4 h-4" />
+        </button>
+         <button onClick={onRedo} disabled={!canRedo} className="group flex items-center gap-1.5 px-3 py-1.5 text-gray-400 hover:text-white rounded-md hover:bg-gray-700/50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed" title="Redo (Ctrl+Shift+Z)">
+            <RedoIcon className="w-4 h-4" />
+        </button>
+      </div>
+
       <div className="flex-grow flex justify-end items-center gap-2 text-sm">
         <button 
           onClick={onShowVisualization}
