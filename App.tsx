@@ -3,7 +3,7 @@ import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import CircuitCanvas from './components/CircuitCanvas';
 import RightPanel from './components/RightPanel';
-import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus } from './types';
+import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus, ReplaceCircuitPayload } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
 import { getAgentResponse, getTutorResponse, generateQiskitCode, managerSystemInstruction } from './services/geminiService';
@@ -248,64 +248,73 @@ export const App: React.FC = () => {
 
 
   const executeActions = useCallback((actions: AIAction[]) => {
-    const currentPlacedGates = placedItems.filter((i): i is PlacedGate => 'gateId' in i);
     // 1. Determine the final number of qubits. This is the ground truth for all subsequent validation.
-    const setQubitAction = actions.find(a => a.type === 'set_qubit_count');
-    const finalNumQubits = setQubitAction && setQubitAction.type === 'set_qubit_count' 
-        ? setQubitAction.payload.count 
-        : numQubits;
-    
+    const setQubitAction = actions.find((a): a is { type: 'set_qubit_count'; payload: { count: number } } => a.type === 'set_qubit_count');
+    const finalNumQubits = setQubitAction ? setQubitAction.payload.count : numQubits;
+
     if (finalNumQubits < 2 || finalNumQubits > 5) {
         console.error("AI requested an invalid number of qubits:", finalNumQubits);
         return; // Abort if qubit count is out of bounds.
     }
 
-    let gatePayloads: Omit<PlacedGate, 'instanceId' | 'isSelected'>[] = [];
-
-    // 2. Determine the definitive gate layout. Actions are prioritized to prevent order-of-execution bugs.
-    const replaceAction = actions.find(a => a.type === 'replace_circuit');
+    // 2. Establish the baseline circuit state before applying additive changes.
+    let baseItems: PlacedItem[] = [...placedItems]; // Start with current state by default.
+    
+    const replaceAction = actions.find((a): a is { type: 'replace_circuit'; payload: ReplaceCircuitPayload } => a.type === 'replace_circuit');
     const clearAction = actions.find(a => a.type === 'clear_circuit');
 
-    if (replaceAction && replaceAction.type === 'replace_circuit') {
-        // If there's a replacement, it's the ONLY source of truth for gates.
-        gatePayloads = replaceAction.payload;
+    if (replaceAction) {
+        // A replace action is definitive and ignores the current state. All items will be PlacedGate.
+        baseItems = replaceAction.payload.map((g, i) => ({
+            ...g,
+            instanceId: `temp-replace-${i}`
+        }));
     } else if (setQubitAction || clearAction) {
         // A qubit change or explicit clear results in an empty canvas.
-        // We only consider add_gate actions after this.
-        const addActions = actions.filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate');
-        gatePayloads = addActions.map(a => a.payload);
-    } else {
-        // Otherwise, start with the current gates and append any new ones.
-        const currentGates = currentPlacedGates.map(({ instanceId, isSelected, ...rest }) => rest);
-        const addedGates = actions
-            .filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate')
-            .map(a => a.payload);
-        gatePayloads = [...currentGates, ...addedGates];
+        baseItems = [];
     }
     
-    const isValidGate = (gate: Omit<PlacedGate, 'instanceId' | 'isSelected'>, qCount: number) => {
-        const targetQubitValid = gate.qubit >= 0 && gate.qubit < qCount;
-        const controlQubitValid = gate.controlQubit === undefined || (gate.controlQubit >= 0 && gate.controlQubit < qCount);
-        return targetQubitValid && controlQubitValid;
+    // 3. Apply any additive actions on top of the baseline. These are also PlacedGate.
+    const addActions = actions.filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate');
+    
+    const addedItems: PlacedGate[] = addActions.map((a, i) => ({
+        ...a.payload,
+        instanceId: `temp-add-${i}`
+    }));
+
+    const finalItemsRaw = [...baseItems, ...addedItems];
+    
+    const isValidItem = (item: PlacedItem, qCount: number): boolean => {
+        // For custom gates, we just check the top qubit. The definition handles the span.
+        if ('customGateId' in item) {
+            return item.qubit >= 0 && item.qubit < qCount;
+        }
+        // For standard gates, check all involved qubits.
+        if ('gateId' in item) {
+            const targetQubitValid = item.qubit >= 0 && item.qubit < qCount;
+            const controlQubitValid = item.controlQubit === undefined || (item.controlQubit >= 0 && item.controlQubit < qCount);
+            return targetQubitValid && controlQubitValid;
+        }
+        return false;
     };
 
-    // 3. Validate all gates against the final qubit count and assign unique IDs.
-    const validatedPlacedGates: PlacedGate[] = gatePayloads
-        .filter(g => isValidGate(g, finalNumQubits))
-        .map((g, i) => ({
-            ...g,
-            instanceId: `${g.gateId}-${Date.now()}-${i}`,
-        }));
+    // 4. Validate all items against the final qubit count and assign unique, final IDs.
+    const validatedPlacedItems: PlacedItem[] = finalItemsRaw
+        .filter(item => isValidItem(item, finalNumQubits))
+        .map((item, i) => {
+            const baseId = 'gateId' in item ? item.gateId : item.customGateId;
+            return { ...item, instanceId: `${baseId}-${Date.now()}-${i}` };
+        });
 
-    if (validatedPlacedGates.length < gatePayloads.length) {
-        console.warn("Some gates were discarded by the validator as they were invalid for the final qubit count.");
+    if (validatedPlacedItems.length < finalItemsRaw.length) {
+        console.warn("Some items were discarded by the validator as they were invalid for the final qubit count.");
     }
     
-    // 4. Atomically apply the final state to React history.
+    // 5. Atomically apply the final state to React history.
     setState({
         ...state,
         numQubits: finalNumQubits,
-        placedItems: validatedPlacedGates,
+        placedItems: validatedPlacedItems,
     });
     setSelectedItemIds([]);
 

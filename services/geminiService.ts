@@ -23,7 +23,7 @@ const setQubitCountTool: FunctionDeclaration = {
 const designTools = [addGateTool, replaceCircuitTool, getSimulationResultsTool, setQubitCountTool];
 
 // --- Agent System Instructions ---
-const gateLibrary = gates.map(g => `- **${g.name} (id: '${g.id}', type: ${g.type})**: ${g.description}`).join('\n');
+const staticGateLibrary = gates.map(g => `- **${g.name} (id: '${g.id}', type: ${g.type})**: ${g.description}`).join('\n');
 
 const sotaConceptsLibrary = `
 **SOTA Circuit Concepts Library:**
@@ -37,7 +37,7 @@ export const managerSystemInstruction = () => `You are the Manager of Milimo AI,
 **Your Input:** You will receive the user's latest request along with the current state of the quantum circuit canvas.
 
 **Gate Library:**
-${gateLibrary}
+${staticGateLibrary}
 
 ${sotaConceptsLibrary}
 
@@ -80,7 +80,7 @@ ${sotaConceptsLibrary}
 const criticSystemInstruction = `You are the Critic for Milimo AI, the Quality Assurance agent. Your goal is to evaluate a proposed research finding against the user's original intent to prevent lazy or overly simplistic solutions.
 
 **Gate Library:**
-${gateLibrary}
+${staticGateLibrary}
 
 ${sotaConceptsLibrary}
 
@@ -103,21 +103,51 @@ const criticSchema = {
     required: ['is_approved', 'reasoning'],
 };
 
-const designAgentSystemInstruction = (numQubits: number) => `You are the Design Agent for Milimo AI, a master quantum circuit builder. Your purpose is to execute a PRE-APPROVED plan from the Manager and Critic.
+const designAgentSystemInstruction = (numQubits: number, originalUserPrompt: string) => {
+    const dynamicGateLibrary = gates.map(g => `- **${g.name} (id: '${g.id}', type: ${g.type})**: ${g.description}`).join('\n');
+    const definitiveGateIdList = JSON.stringify(gates.map(g => g.id));
+
+    return `You are the Design Agent for Milimo AI, a master quantum circuit builder. Your purpose is to execute a PRE-APPROVED high-level plan, but you MUST ensure ALL constraints from the original user request are met.
+
+**Original User Request (Ground Truth):**
+"${originalUserPrompt}"
+
+**Definitive Component Checklist (Ground Truth):**
+The complete and exhaustive set of available gate IDs is: ${definitiveGateIdList}. This is your ground truth for any 'use all' constraints.
 
 **Circuit Constraints:**
-- The circuit has ${numQubits} qubits (0 to ${numQubits - 1}).
-- 'left' parameter (0-100) dictates gate order. Use sensible, spaced-out values (e.g., 20, 40, 60).
-- For controlled gates, you MUST specify both 'qubit' (target) and 'controlQubit'.
+- The circuit has ${numQubits} qubits (0 to ${numQubits - 1}). This can be changed with the 'set_qubit_count' tool if necessary.
+- 'left' parameter (0-100) dictates gate order. Use sensible, spaced-out values.
 
 **Available Components & Tools:**
-${gateLibrary}
+${dynamicGateLibrary}
 - **Set Qubit Count (tool: 'set_qubit_count')**: Changes the number of qubits on the canvas (from 2-5). This will clear the board.
+- **Add Gate (tool: 'add_gate')**: Adds a single gate to the circuit.
+- **Replace Circuit (tool: 'replace_circuit')**: Replaces the entire circuit with a new set of gates. PREFER this for building new circuits from scratch.
 - **Get Simulation Results (tool: 'get_simulation_results')**: Retrieves the current state vector and measurement probabilities.
 
-**Core Directive:**
-- **EXECUTE PRECISELY:** Your task has been vetted. Do not deviate. You MUST construct the circuit exactly as described in the prompt using the available tools.
-- **PRIORITIZE 'replace_circuit'**: For building entire new states from scratch, 'replace_circuit' is preferred to ensure a clean canvas, especially after changing the qubit count.`;
+**CRITICAL 3-STEP EXECUTION PROCESS:**
+You MUST follow this internal monologue process before calling any tools.
+
+**Step 1: Pre-computation (Internal Monologue).**
+Based on the high-level prompt you received (e.g., "Build the 5-qubit error correcting code"), formulate an initial plan of which tools and gates you *intend* to use.
+*Example Internal Monologue:* "To build the 5-qubit code, I will need H, X, Z, and CNOT gates. I will use the 'set_qubit_count' tool to set 5 qubits, and then the 'replace_circuit' tool with a payload of these gates."
+
+**Step 2: Self-Critique against Constraints (Internal Monologue).**
+Compare your pre-computed plan from Step 1 against the **Original User Request** and the **Definitive Component Checklist**. Identify any constraints that your initial plan fails to meet.
+*Example Internal Monologue:* "My initial plan uses H, X, Z, and CNOT. The Original User Request includes the constraint 'use all the quantum gates'. My plan fails this constraint because it omits several gates from the definitive checklist, including 'measure'. My plan is incomplete."
+
+**Step 3: Self-Correction and Final Execution.**
+If Step 2 reveals a failure, you MUST generate a new, corrected, two-phase plan and then execute it by calling the necessary tools.
+
+**Two-Phase Correction Algorithm:**
+1.  **Phase 1: Build the Conceptual Circuit.** First, use your tools (e.g., \`replace_circuit\`) to build the primary, conceptually-rich circuit requested by the user (like the 5-qubit error-correcting code).
+2.  **Phase 2: Algorithmic Completion.** Second, determine the set of \`gateId\`s from the **Definitive Component Checklist** that were NOT used in Phase 1. You will then iterate through this set of *missing* gates and use the \`add_gate\` tool to place each one.
+    *   **Rule for Measurement:** If the \`'measure'\` gate is in the set of missing gates, you MUST add it to **all qubits** at the very end of the circuit (e.g., at \`left: 95\`).
+    *   **Rule for Other Gates:** Place the other missing unitary gates on available qubits at subsequent positions after the main circuit (e.g., \`left: 80\`, \`left: 85\`), ensuring they are all present.
+
+Your final output should ONLY be the tool calls required to build the corrected circuit. Do not output your internal monologue.`;
+}
 
 const debuggerAgentSystemInstruction = (circuitDescription: string) => `You are the Debugger Agent for Milimo AI, a quantum circuit expert. Your job is to analyze a user's potentially faulty circuit, identify logical errors, and provide a corrected version.
 
@@ -198,7 +228,7 @@ export const getAgentResponse = async (
 ${userPromptText}
 `;
     
-    const managerResponse = await chatSession.sendMessage(managerPrompt);
+    const managerResponse = await chatSession.sendMessage({ message: managerPrompt });
     
     let plan: any[] = [];
     try {
@@ -228,7 +258,7 @@ ${userPromptText}
         onStatusUpdate({ agent: 'Optimizer', status: 'running', message: optimizerStep.reasoning });
         const optimizerResponse = await ai.models.generateContent({
             model,
-            contents: [{ role: 'user', parts: [{ text: `User wants to optimize this circuit. Please analyze and respond.` }] }],
+            contents: `User wants to optimize this circuit. Please analyze and respond.`,
             config: { tools: [{ functionDeclarations: [replaceCircuitTool] }], systemInstruction: optimizerAgentSystemInstruction(circuitDescriptionForManager) },
         });
 
@@ -252,11 +282,12 @@ ${userPromptText}
         onStatusUpdate({ agent: 'Debugger', status: 'running', message: debuggerStep.reasoning });
         const debuggerResponse = await ai.models.generateContent({
             model,
-            contents: [{ role: 'user', parts: [{ text: `User wants to debug this circuit. Please analyze and respond.` }] }],
+            contents: `User wants to debug this circuit. Please analyze and respond.`,
             config: { tools: [{ functionDeclarations: [replaceCircuitTool] }], systemInstruction: debuggerAgentSystemInstruction(circuitDescriptionForManager) },
         });
 
         if (debuggerResponse.functionCalls && debuggerResponse.functionCalls.length > 0) {
+            // FIX: Used debuggerResponse instead of optimizerResponse
             const replaceCall = debuggerResponse.functionCalls.find(fc => fc.name === 'replace_circuit');
             if (replaceCall) {
                 executionContext.designActions.push({ type: 'replace_circuit', payload: (replaceCall.args as any).gates });
@@ -277,7 +308,7 @@ ${userPromptText}
         onStatusUpdate({ agent: 'Research', status: 'running', message: researchStep.reasoning });
         const researchResponse = await ai.models.generateContent({
             model,
-            contents: [{ role: 'user', parts: [{ text: researchStep.prompt }] }],
+            contents: researchStep.prompt,
             config: { tools: [{ googleSearch: {} }] }
         });
         executionContext.researchFindings = researchResponse.text;
@@ -302,7 +333,7 @@ ${userPromptText}
             const criticPrompt = `User's original request: "${executionContext.userPrompt}"\n\nResearch Agent's findings: "${executionContext.researchFindings}"`;
             const criticResponse = await ai.models.generateContent({
                 model,
-                contents: [{ role: 'user', parts: [{ text: criticPrompt }] }],
+                contents: criticPrompt,
                 config: { systemInstruction: criticSystemInstruction, responseMimeType: 'application/json', responseSchema: criticSchema }
             });
             const criticDecision = JSON.parse(criticResponse.text);
@@ -318,7 +349,7 @@ ${userPromptText}
                     onStatusUpdate({ agent: 'Research', status: 'running', message: 'Finding a more advanced alternative...' });
                     const researchResponse = await ai.models.generateContent({
                         model,
-                        contents: [{ role: 'user', parts: [{ text: criticDecision.rejection_prompt }] }],
+                        contents: criticDecision.rejection_prompt,
                         config: { tools: [{ googleSearch: {} }] }
                     });
                     executionContext.researchFindings = researchResponse.text;
@@ -346,8 +377,8 @@ ${userPromptText}
         
         const designResponse = await ai.models.generateContent({
             model,
-            contents: [{ role: 'user', parts: [{ text: designPrompt }] }],
-            config: { tools: [{ functionDeclarations: designTools }], systemInstruction: designAgentSystemInstruction(numQubits) },
+            contents: designPrompt,
+            config: { tools: [{ functionDeclarations: designTools }], systemInstruction: designAgentSystemInstruction(numQubits, executionContext.userPrompt) },
         });
         
         if (designResponse.functionCalls && designResponse.functionCalls.length > 0) {
@@ -432,7 +463,7 @@ ${userPromptText}
 
     const explanationResponse = await ai.models.generateContent({
         model,
-        contents: [{ role: 'user', parts: [{ text: explanationContext }] }],
+        contents: explanationContext,
         config: { systemInstruction: explanationAgentSystemInstruction }
     });
     onStatusUpdate({ agent: 'Explanation', status: 'completed', message: 'Response ready.' });
@@ -469,7 +500,7 @@ export const getTutorResponse = async (
   
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash', // Use a faster model for tutoring
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    contents: prompt,
     config: { systemInstruction: tutorSystemInstruction }
   });
 
