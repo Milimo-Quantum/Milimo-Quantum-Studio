@@ -6,11 +6,12 @@ import RightPanel from './components/RightPanel';
 import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
-import { getAgentResponse, getTutorResponse, generateQiskitCode } from './services/geminiService';
+import { getAgentResponse, getTutorResponse, generateQiskitCode, managerSystemInstruction } from './services/geminiService';
 import { simulate } from './services/quantumSimulator';
 import { gateMap } from './data/gates';
 import { useHistory } from './hooks/useHistory';
 import TutorNotification from './components/TutorNotification';
+import { Chat, GoogleGenAI } from '@google/genai';
 
 const INITIAL_STATE: CircuitState = {
   numQubits: 3,
@@ -83,6 +84,9 @@ export const App: React.FC = () => {
     { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. You can give me complex challenges like 'build a quantum teleportation circuit' or give me step-by-step instructions like 'add a Hadamard to qubit 0'." },
   ]);
   const [isAiLoading, setIsAiLoading] = useState(false);
+  
+  // --- Conversational AI State ---
+  const [aiChatSession, setAiChatSession] = useState<Chat | null>(null);
 
   // --- Tutor Mode State ---
   const [isTutorModeActive, setIsTutorModeActive] = useState(false);
@@ -103,6 +107,26 @@ export const App: React.FC = () => {
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragInfoRef = useRef<{ component: QuantumGate | CustomGateDefinition | null }>({ component: null });
+
+  // --- Initialize AI Chat Session ---
+  useEffect(() => {
+    const initializeChat = async () => {
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+            const chatSession = ai.chats.create({
+                model: 'gemini-2.5-pro',
+                config: {
+                    systemInstruction: managerSystemInstruction(),
+                },
+            });
+            setAiChatSession(chatSession);
+        } catch (error) {
+            console.error("Failed to initialize AI chat session:", error);
+            // You might want to display an error message to the user here.
+        }
+    };
+    initializeChat();
+  }, []);
 
   // --- Load from URL on mount ---
   useEffect(() => {
@@ -299,15 +323,15 @@ export const App: React.FC = () => {
 
 
   const handleSend = useCallback(async (prompt: string) => {
-    if (prompt.trim() === '' || isAiLoading) return;
+    if (prompt.trim() === '' || isAiLoading || !aiChatSession) return;
     setSelectedItemIds([]);
     setSimulationStep(null); // Exit step-through mode when interacting with AI
 
     const userMessage: Message = { type: 'text', sender: 'user', text: prompt };
-    const allMessages = [...messages, userMessage];
+    setMessages(prev => [...prev, userMessage]);
     
     const agentStatusMessage: Message = { type: 'agent_status', updates: [] };
-    setMessages([...allMessages, agentStatusMessage]);
+    setMessages(prev => [...prev, agentStatusMessage]);
     setIsAiLoading(true);
     setActiveTab('copilot');
 
@@ -325,7 +349,7 @@ export const App: React.FC = () => {
     };
     
     try {
-      const aiResponse = await getAgentResponse(allMessages, placedGates, simulationResult, numQubits, hardwareResult, onStatusUpdate);
+      const aiResponse = await getAgentResponse(aiChatSession, prompt, placedGates, simulationResult, numQubits, hardwareResult, onStatusUpdate);
       if (aiResponse.actions.length > 0) {
         executeActions(aiResponse.actions);
       }
@@ -350,7 +374,7 @@ export const App: React.FC = () => {
     } finally {
       setIsAiLoading(false);
     }
-  }, [isAiLoading, placedItems, messages, executeActions, simulationResult, numQubits, hardwareResult]);
+  }, [isAiLoading, placedItems, executeActions, simulationResult, numQubits, hardwareResult, aiChatSession]);
 
   const handleAnalyzeCircuit = useCallback(() => {
     handleSend("Analyze my current circuit. Identify its purpose if it's a known algorithm or state, explain the principles behind it, and propose potential next steps or interesting modifications. If there are hardware results available, compare them to the ideal simulation and explain any differences.");
@@ -632,33 +656,24 @@ export const App: React.FC = () => {
       }
     };
 
-    if (!jobId || jobStatus === 'idle' || jobStatus === 'completed' || jobStatus === 'error') {
+    // FIX: This condition was potentially causing a TypeScript/linter error due to how type narrowing
+    // was being inferred. Refactoring to a separate boolean variable clarifies the intent.
+    const isTerminalStatus = jobStatus === 'idle' || jobStatus === 'completed' || jobStatus === 'error';
+    if (!jobId || isTerminalStatus) {
       clearPolling();
       return;
     }
 
     if (!pollingIntervalRef.current) {
       pollingIntervalRef.current = window.setInterval(async () => {
-        let serverStatus: JobStatus = 'idle';
         try {
             // In a real application, you would uncomment this block to poll your backend.
             /*
             const response = await fetch(`/api/job-status/${jobId}`);
             if (!response.ok) throw new Error('Status check failed');
             const { status } = await response.json();
-            serverStatus = status as JobStatus;
+            const serverStatus = status as JobStatus;
             setJobStatus(serverStatus);
-            */
-            
-            // --- SIMULATION FOR DEMO ---
-            // This simulates the backend returning a new status on each poll.
-            setJobStatus(currentStatus => {
-                if (currentStatus === 'queued') serverStatus = 'running';
-                else if (currentStatus === 'running') serverStatus = 'completed';
-                else serverStatus = currentStatus;
-                return serverStatus;
-            });
-            // --- END SIMULATION ---
 
             if (serverStatus === 'completed' || serverStatus === 'error') {
               clearPolling();
@@ -666,7 +681,29 @@ export const App: React.FC = () => {
                 await fetchJobResult(jobId);
               }
             }
+            */
+            
+            // --- SIMULATION FOR DEMO ---
+            // This simulates the backend returning a new status on each poll.
+            setJobStatus(currentStatus => {
+                let nextStatus: JobStatus = currentStatus;
+                if (currentStatus === 'queued') {
+                    nextStatus = 'running';
+                } else if (currentStatus === 'running') {
+                    nextStatus = 'completed';
+                }
 
+                // Logic to fetch results must be tied to the status change.
+                if (nextStatus === 'completed') {
+                    fetchJobResult(jobId);
+                    clearPolling();
+                } else if (nextStatus === 'error') {
+                    clearPolling();
+                }
+
+                return nextStatus;
+            });
+            // --- END SIMULATION ---
         } catch (error) {
             console.error('Error polling job status:', error);
             setJobStatus('error');
@@ -749,7 +786,7 @@ export const App: React.FC = () => {
             setPhaseDampingError={setPhaseDampingError}
             hardwareResult={hardwareResult}
             isHardwareRunning={isHardwareRunning}
-            onRunOnHardware={(apiKey) => handleRunOnHardware(apiKey, 'ibm_brisbane')}
+            onRunOnHardware={handleRunOnHardware}
             jobId={jobId}
             jobStatus={jobStatus}
           />

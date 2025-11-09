@@ -24,7 +24,7 @@ interface RightPanelProps {
   setPhaseDampingError: (value: number) => void;
   hardwareResult: SimulationResult | null;
   isHardwareRunning: boolean;
-  onRunOnHardware: (apiKey: string) => void;
+  onRunOnHardware: (apiKey: string, backendName: string) => void;
   jobId: string | null;
   jobStatus: JobStatus;
 }

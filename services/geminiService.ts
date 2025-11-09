@@ -1,4 +1,4 @@
-import { GoogleGenAI, FunctionDeclaration, Type, Content, Part } from "@google/genai";
+import { GoogleGenAI, FunctionDeclaration, Type, Content, Part, Chat } from "@google/genai";
 import type { AIResponse, AgentStatusUpdate, PlacedGate, AIAction, Message, SimulationResult, Source, AddGatePayload, PlacedItem, CustomGateDefinition } from "../types";
 import { gateMap, gates } from "../data/gates";
 import { unrollCircuit } from "./quantumSimulator";
@@ -32,11 +32,9 @@ const sotaConceptsLibrary = `
 - **Deutsch-Jozsa Algorithm:** A simple but powerful demonstration of quantum parallelism, determining if a function is constant or balanced in a single evaluation. Requires N+1 qubits for an N-bit function.
 `;
 
-const managerSystemInstruction = (numQubits: number, circuitDescription: string) => `You are the Manager of Milimo AI, a team of specialized quantum AI agents. Your job is to create a robust, multi-step plan to fulfill the user's request with the highest quality.
+export const managerSystemInstruction = () => `You are the Manager of Milimo AI, a team of specialized quantum AI agents. Your job is to create a robust, multi-step plan to fulfill the user's request based on the provided context.
 
-**Canvas State:**
-- The canvas currently has ${numQubits} qubits (0 to ${numQubits - 1}). This can be changed to any value between 2 and 5 using the 'set_qubit_count' tool.
-- **Current Circuit on Canvas:** ${circuitDescription}
+**Your Input:** You will receive the user's latest request along with the current state of the quantum circuit canvas.
 
 **Gate Library:**
 ${gateLibrary}
@@ -44,19 +42,16 @@ ${gateLibrary}
 ${sotaConceptsLibrary}
 
 **Core Directives:**
-1.  **Analyze User Intent:**
+1.  **Analyze User Intent & Context:**
     - **Complex Build/Research:** If the user asks to build, create, or show an abstract concept (e.g., "teleportation", "error correction"), formulate a research-critic-design plan.
-    - **Simple Command:** If the user gives a direct, simple command like "add a Hadamard to qubit 0" or "put a CNOT from 0 to 1", create a single-step plan with just a "Design" agent. The prompt for the Design agent should be the user's exact command. This is for fast, conversational building.
-    - **Analyze:** If the user asks to "analyze the current circuit", your output plan MUST be an empty array: \`[]\`. The Explanation agent will handle this.
-    - **Debug:** If the user asks to "debug" or "fix" the circuit, create a plan with a single "Debugger" step.
-    - **Optimize:** If the user asks to "optimize" or "simplify" the circuit, create a plan with a single "Optimizer" step.
-2.  **Prioritize the Ideal Solution:** For complex build requests, determine the best, most advanced circuit. Formulate a plan to build it directly if it fits, or adapt the canvas first if necessary.
-3.  **Mandatory Quality Assurance:** For any abstract or complex request that requires research to build a new circuit, your plan MUST include a 'Critic' step immediately after the 'Research' step.
-4.  **Formulate the Plan:** Your output MUST be a single JSON object containing a "plan" array.
+    - **Simple Command:** If the user gives a direct, simple command like "add a Hadamard to qubit 0", create a single-step "Design" agent plan. The prompt for the Design agent should be the user's exact command for fast, conversational building.
+    - **Analyze/Debug/Optimize:** If the user asks to "analyze", "debug", or "optimize" the current circuit, create a single-step plan for the corresponding agent.
+2.  **Formulate the Plan:** Your output MUST be a single JSON object inside a markdown code block. The JSON object must contain a "plan" array. Do not output any other text.
 
 **Example: Simple Command**
-*User Prompt:* "add a hadamard to qubit 1 at 50%"
-*Your JSON Output:*
+*User Prompt provides context for a 3-qubit circuit and asks "add a hadamard to qubit 1 at 50%"*
+*Your Output:*
+\`\`\`json
 {
   "plan": [
     {
@@ -66,36 +61,21 @@ ${sotaConceptsLibrary}
     }
   ]
 }
+\`\`\`
 
 **Example: Complex Request**
-*User Prompt:* "Show me quantum error correction"
-*Your JSON Output:*
+*User Prompt provides context for an empty canvas and asks "Show me quantum error correction"*
+*Your Output:*
+\`\`\`json
 {
   "plan": [
-    { "agent_to_call": "Research", ... },
-    { "agent_to_call": "Critic", ... },
-    { "agent_to_call": "Design", ... }
+    { "agent_to_call": "Research", "reasoning": "...", "prompt": "..." },
+    { "agent_to_call": "Critic", "reasoning": "...", "prompt": "..." },
+    { "agent_to_call": "Design", "reasoning": "...", "prompt": "..." }
   ]
-}`;
-
-const managerSchema = {
-    type: Type.OBJECT,
-    properties: {
-        plan: {
-            type: Type.ARRAY,
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    agent_to_call: { type: Type.STRING, enum: ['Research', 'Critic', 'Design', 'Explanation', 'Debugger', 'Optimizer'] },
-                    reasoning: { type: Type.STRING },
-                    prompt: { type: Type.STRING },
-                },
-                required: ['agent_to_call', 'reasoning', 'prompt'],
-            }
-        }
-    },
-    required: ['plan'],
-};
+}
+\`\`\`
+`;
 
 const criticSystemInstruction = `You are the Critic for Milimo AI, the Quality Assurance agent. Your goal is to evaluate a proposed research finding against the user's original intent to prevent lazy or overly simplistic solutions.
 
@@ -194,7 +174,8 @@ const explanationAgentSystemInstruction = `You are the Explanation Agent for Mil
 
 // The main function that orchestrates the agent workflow.
 export const getAgentResponse = async (
-  allMessages: Message[],
+  chatSession: Chat,
+  userPromptText: string,
   currentCircuit: PlacedGate[],
   simulationResult: SimulationResult | null,
   numQubits: number,
@@ -202,21 +183,34 @@ export const getAgentResponse = async (
   onStatusUpdate: (update: AgentStatusUpdate) => void
 ): Promise<AIResponse> => {
     
-    const textMessages = allMessages.filter((m): m is Extract<Message, {type: 'text'}> => m.type === 'text');
-    const conversationHistory = textMessages.slice(-6).map(m => `${m.sender}: ${m.text}`).join('\n');
-    const userPromptText = textMessages[textMessages.length - 1]?.text || '';
-    
     const circuitDescriptionForManager = currentCircuit.length > 0
         ? JSON.stringify(currentCircuit.map(g => ({ gate: g.gateId, qubit: g.qubit, control: g.controlQubit, position: g.left })))
         : 'The circuit is currently empty.';
     
     onStatusUpdate({ agent: 'Manager', status: 'running', message: 'Creating project plan...' });
-    const managerResponse = await ai.models.generateContent({
-        model,
-        contents: [{ role: 'user', parts: [{ text: `**Conversation History:**\n${conversationHistory}\n\n**Latest User Request:**\n${userPromptText}` }] }],
-        config: { systemInstruction: managerSystemInstruction(numQubits, circuitDescriptionForManager), responseMimeType: 'application/json', responseSchema: managerSchema }
-    });
-    const plan = JSON.parse(managerResponse.text).plan;
+
+    const managerPrompt = `
+**Canvas State:**
+- The canvas currently has ${numQubits} qubits (0 to ${numQubits - 1}). This can be changed to any value between 2 and 5 using the 'set_qubit_count' tool.
+- **Current Circuit on Canvas:** ${circuitDescriptionForManager}
+
+**Latest User Request:**
+${userPromptText}
+`;
+    
+    const managerResponse = await chatSession.sendMessage(managerPrompt);
+    
+    let plan: any[] = [];
+    try {
+        const jsonText = managerResponse.text.match(/```json\n([\s\S]*?)\n```/)?.[1];
+        if (!jsonText) {
+            throw new Error("Manager did not return a valid JSON plan.");
+        }
+        plan = JSON.parse(jsonText).plan;
+    } catch (e) {
+        console.error("Failed to parse manager plan:", e);
+        return { displayText: "I had trouble formulating a plan. Could you please rephrase your request?", actions: [] };
+    }
     onStatusUpdate({ agent: 'Manager', status: 'completed', message: 'Plan created.' });
 
     let executionContext = {

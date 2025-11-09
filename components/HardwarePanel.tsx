@@ -5,7 +5,7 @@ import type { JobStatus } from '../types';
 import KeyIcon from './icons/KeyIcon';
 
 interface HardwarePanelProps {
-  onRunOnHardware: (apiKey: string) => void;
+  onRunOnHardware: (apiKey: string, backendName: string) => void;
   isRunning: boolean;
   jobId: string | null;
   jobStatus: JobStatus;
@@ -28,16 +28,15 @@ const statusMessages: Record<JobStatus, string> = {
 
 const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunning, jobId, jobStatus }) => {
   const [apiKey, setApiKey] = useState('');
+  const [selectedBackend, setSelectedBackend] = useState(backends[0].name);
 
   const handleRunClick = () => {
     if (apiKey.trim()) {
-      onRunOnHardware(apiKey);
+      onRunOnHardware(apiKey, selectedBackend);
     } else {
       alert("An API Key from a provider is required to run on hardware.");
     }
   };
-
-  const selectedBackend = backends[0];
 
   return (
     <motion.div
@@ -52,17 +51,19 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
         <h3 className="text-gray-400 mb-2">Available Backends</h3>
         <div className="space-y-2 mb-4">
           {backends.map((backend, index) => (
-              <motion.div
+              <motion.button
                   key={backend.name}
+                  onClick={() => backend.status === 'online' && setSelectedBackend(backend.name)}
                   initial={{ opacity: 0, x: 10 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.3, delay: 0.1 * index }}
-                  className={`flex items-center justify-between p-3 rounded-lg border ${index === 0 ? 'bg-gray-700/50 border-cyan-500/30' : 'bg-gray-800/30 border-gray-700/50 opacity-60'}`}
+                  disabled={backend.status !== 'online' || isRunning}
+                  className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all ${selectedBackend === backend.name ? 'bg-gray-700/50 border-cyan-500/30 ring-1 ring-cyan-500/30' : 'bg-gray-800/30 border-gray-700/50'} ${backend.status === 'online' ? 'cursor-pointer hover:border-cyan-500/50' : 'cursor-not-allowed opacity-60'}`}
               >
-                  <div className="flex items-center gap-3">
-                      <BackendIcon className={`w-5 h-5 ${index === 0 ? 'text-cyan-400' : 'text-gray-500'}`} />
+                  <div className="flex items-center gap-3 text-left">
+                      <BackendIcon className={`w-5 h-5 ${selectedBackend === backend.name ? 'text-cyan-400' : 'text-gray-500'}`} />
                       <div>
-                          <p className={`font-semibold ${index === 0 ? 'text-white' : 'text-gray-400'}`}>{backend.name}</p>
+                          <p className={`font-semibold ${selectedBackend === backend.name ? 'text-white' : 'text-gray-400'}`}>{backend.name}</p>
                           <p className="text-xs text-gray-500">{backend.qubits} Qubits</p>
                       </div>
                   </div>
@@ -70,7 +71,7 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
                       <div className={`w-2 h-2 rounded-full ${backend.status === 'online' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
                       <span className="text-xs text-gray-400 capitalize">{backend.status}</span>
                   </div>
-              </motion.div>
+              </motion.button>
           ))}
         </div>
 
@@ -126,7 +127,7 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
                     <span>Processing...</span>
                 </>
             ) : (
-                `Run on ${selectedBackend.name}`
+                `Run on ${selectedBackend}`
             )}
           </motion.button>
            <p className="text-center text-xs text-gray-600 mt-3">
