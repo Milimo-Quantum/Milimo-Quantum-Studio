@@ -5,7 +5,7 @@ import CopilotChat from './CopilotChat';
 import VisualizationPanel from './VisualizationPanel';
 import CodePanel from './CodePanel';
 import HardwarePanel from './HardwarePanel';
-import type { Message, SimulationResult, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus } from '../types';
+import type { Message, SimulationResult, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus, Backend } from '../types';
 import ChipIcon from './icons/ChipIcon';
 
 interface RightPanelProps {
@@ -25,7 +25,7 @@ interface RightPanelProps {
   setPhaseDampingError: (value: number) => void;
   hardwareResult: SimulationResult | null;
   isHardwareRunning: boolean;
-  onRunOnHardware: (apiKey: string, backend: { name: string, provider: 'ibm' | 'google' }) => void;
+  onRunOnHardware: (apiKey: string, backend: Backend) => void;
   jobId: string | null;
   jobStatus: JobStatus;
 }

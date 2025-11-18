@@ -2,15 +2,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BackendIcon from './icons/BackendIcon';
-import type { JobStatus } from '../types';
+import type { JobStatus, Backend } from '../types';
 import KeyIcon from './icons/KeyIcon';
-
-export interface Backend {
-    name: string;
-    provider: 'ibm' | 'google';
-    qubits: number;
-    status: 'online' | 'maintenance' | 'offline';
-}
+import ChipIcon from './icons/ChipIcon';
 
 interface HardwarePanelProps {
   onRunOnHardware: (apiKey: string, backend: Backend) => void;
@@ -20,17 +14,21 @@ interface HardwarePanelProps {
 }
 
 const backends: Backend[] = [
-    { name: 'ibm_brisbane', provider: 'ibm', qubits: 127, status: 'online' },
-    { name: 'ibm_kyoto', provider: 'ibm', qubits: 127, status: 'maintenance' },
-    { name: 'google_sycamore', provider: 'google', qubits: 53, status: 'online' },
-    { name: 'google_weber', provider: 'google', qubits: 53, status: 'online' },
+    // QPUs
+    { name: 'ibm_brisbane', provider: 'ibm', qubits: 127, status: 'online', type: 'qpu' },
+    { name: 'ibm_kyoto', provider: 'ibm', qubits: 127, status: 'maintenance', type: 'qpu' },
+    { name: 'google_sycamore', provider: 'google', qubits: 53, status: 'online', type: 'qpu' },
+    { name: 'google_weber', provider: 'google', qubits: 53, status: 'online', type: 'qpu' },
+    // Simulators
+    { name: 'ibmq_qasm_simulator', provider: 'ibm', qubits: 32, status: 'online', type: 'simulator' },
+    { name: 'cirq_simulator', provider: 'google', qubits: 30, status: 'online', type: 'simulator' },
 ];
 
 const statusMessages: Record<JobStatus, string> = {
     idle: 'Awaiting submission.',
     submitted: 'Submitting job to backend...',
     queued: 'Job is in the queue.',
-    running: 'Executing on quantum hardware...',
+    running: 'Executing...',
     completed: 'Job completed successfully.',
     error: 'An error occurred during the job.',
 };
@@ -40,9 +38,10 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
   const [selectedBackendName, setSelectedBackendName] = useState<string>(backends[0].name);
   
   const selectedBackend = backends.find(b => b.name === selectedBackendName) || backends[0];
+  const isSimulator = selectedBackend.type === 'simulator';
 
   const handleRunClick = () => {
-    if (apiKey.trim()) {
+    if (isSimulator || apiKey.trim()) {
       onRunOnHardware(apiKey, selectedBackend);
     } else {
       alert("An API Key from a provider is required to run on hardware.");
@@ -52,6 +51,40 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
   const getProviderColor = (provider: 'ibm' | 'google') => {
       return provider === 'google' ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30';
   };
+
+  const renderBackendItem = (backend: Backend, index: number) => (
+      <motion.button
+          key={backend.name}
+          onClick={() => backend.status === 'online' && setSelectedBackendName(backend.name)}
+          initial={{ opacity: 0, x: 10 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.3, delay: 0.05 * index }}
+          disabled={backend.status !== 'online' || isRunning}
+          className={`w-full flex flex-col gap-2 p-3 rounded-lg border transition-all ${selectedBackendName === backend.name ? 'bg-gray-700/50 border-cyan-500/30 ring-1 ring-cyan-500/30' : 'bg-gray-800/30 border-gray-700/50'} ${backend.status === 'online' ? 'cursor-pointer hover:border-cyan-500/50' : 'cursor-not-allowed opacity-60'}`}
+      >
+          <div className="w-full flex items-center justify-between">
+              <div className="flex items-center gap-3 text-left">
+                  {backend.type === 'qpu' ? (
+                      <BackendIcon className={`w-5 h-5 ${selectedBackendName === backend.name ? 'text-cyan-400' : 'text-gray-500'}`} />
+                  ) : (
+                      <ChipIcon className={`w-5 h-5 ${selectedBackendName === backend.name ? 'text-green-400' : 'text-gray-500'}`} />
+                  )}
+                  <div>
+                      <div className="flex items-center gap-2">
+                          <p className={`font-semibold ${selectedBackendName === backend.name ? 'text-white' : 'text-gray-400'}`}>{backend.name}</p>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded border ${getProviderColor(backend.provider)} uppercase tracking-wider`}>
+                            {backend.provider === 'ibm' ? 'IBM' : 'Google'}
+                          </span>
+                      </div>
+                      <p className="text-xs text-gray-500">{backend.qubits} Qubits • {backend.type === 'qpu' ? 'Quantum Processor' : 'Classical Simulator'}</p>
+                  </div>
+              </div>
+               <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${backend.status === 'online' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+              </div>
+          </div>
+      </motion.button>
+  );
 
   return (
     <motion.div
@@ -63,61 +96,52 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
       className="absolute inset-0 flex flex-col font-['IBM_Plex_Mono'] text-sm"
     >
       <div className="flex-grow overflow-y-auto pr-2 custom-scrollbar">
-        <h3 className="text-gray-400 mb-2 sticky top-0 bg-[#0a0a10] z-10 py-1">Available Backends</h3>
-        <div className="space-y-2 mb-4">
-          {backends.map((backend, index) => (
-              <motion.button
-                  key={backend.name}
-                  onClick={() => backend.status === 'online' && setSelectedBackendName(backend.name)}
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.3, delay: 0.1 * index }}
-                  disabled={backend.status !== 'online' || isRunning}
-                  className={`w-full flex flex-col gap-2 p-3 rounded-lg border transition-all ${selectedBackendName === backend.name ? 'bg-gray-700/50 border-cyan-500/30 ring-1 ring-cyan-500/30' : 'bg-gray-800/30 border-gray-700/50'} ${backend.status === 'online' ? 'cursor-pointer hover:border-cyan-500/50' : 'cursor-not-allowed opacity-60'}`}
-              >
-                  <div className="w-full flex items-center justify-between">
-                      <div className="flex items-center gap-3 text-left">
-                          <BackendIcon className={`w-5 h-5 ${selectedBackendName === backend.name ? 'text-cyan-400' : 'text-gray-500'}`} />
-                          <div>
-                              <div className="flex items-center gap-2">
-                                  <p className={`font-semibold ${selectedBackendName === backend.name ? 'text-white' : 'text-gray-400'}`}>{backend.name}</p>
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${getProviderColor(backend.provider)} uppercase tracking-wider`}>
-                                    {backend.provider === 'ibm' ? 'IBM' : 'Google'}
-                                  </span>
-                              </div>
-                              <p className="text-xs text-gray-500">{backend.qubits} Qubits</p>
-                          </div>
-                      </div>
-                       <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${backend.status === 'online' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
-                      </div>
-                  </div>
-              </motion.button>
-          ))}
+        
+        <div className="mb-6">
+            <h3 className="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-3 sticky top-0 bg-[#0a0a10] z-10 py-1">Quantum Processors (QPU)</h3>
+            <div className="space-y-2">
+                {backends.filter(b => b.type === 'qpu').map((b, i) => renderBackendItem(b, i))}
+            </div>
         </div>
 
-        <div>
-            <label htmlFor="api-key" className="text-xs text-gray-400 mb-1 block">
-                {selectedBackend.provider === 'google' ? 'Google Cloud Project ID / API Key' : 'IBM Quantum API Token'}
-            </label>
-            <div className="relative">
-                <KeyIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                <input 
-                    id="api-key"
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={selectedBackend.provider === 'google' ? "Enter Google credential..." : "Enter IBM Quantum token..."}
-                    disabled={isRunning}
-                    className="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all disabled:opacity-50"
-                />
+        <div className="mb-4">
+            <h3 className="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-3 sticky top-0 bg-[#0a0a10] z-10 py-1">Simulators</h3>
+            <div className="space-y-2">
+                 {backends.filter(b => b.type === 'simulator').map((b, i) => renderBackendItem(b, i + 10))}
             </div>
-             <p className="text-[10px] text-gray-500 mt-1">
-                {selectedBackend.provider === 'google' 
-                    ? "Generates Cirq code. Simulates submission to Google Quantum Engine." 
-                    : "Generates Qiskit code. Simulates submission to IBM Quantum Runtime."}
-            </p>
         </div>
+
+        <AnimatePresence>
+            {!isSimulator && (
+                <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                >
+                    <label htmlFor="api-key" className="text-xs text-gray-400 mb-1 block">
+                        {selectedBackend.provider === 'google' ? 'Google Cloud Project ID / API Key' : 'IBM Quantum API Token'}
+                    </label>
+                    <div className="relative">
+                        <KeyIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                        <input 
+                            id="api-key"
+                            type="password"
+                            value={apiKey}
+                            onChange={(e) => setApiKey(e.target.value)}
+                            placeholder={selectedBackend.provider === 'google' ? "Enter Google credential..." : "Enter IBM Quantum token..."}
+                            disabled={isRunning}
+                            className="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all disabled:opacity-50"
+                        />
+                    </div>
+                     <p className="text-[10px] text-gray-500 mt-1">
+                        {selectedBackend.provider === 'google' 
+                            ? "Generates Cirq code. Simulates submission to Google Quantum Engine." 
+                            : "Generates Qiskit code. Simulates submission to IBM Quantum Runtime."}
+                    </p>
+                </motion.div>
+            )}
+        </AnimatePresence>
 
       </div>
 
@@ -145,9 +169,9 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
 
            <motion.button
             onClick={handleRunClick}
-            disabled={isRunning || !apiKey}
+            disabled={isRunning || (!isSimulator && !apiKey)}
             className={`w-full text-white rounded-lg py-3 text-base font-semibold transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-3 ${selectedBackend.provider === 'google' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-purple-600 hover:bg-purple-500'}`}
-            whileTap={{ scale: isRunning || !apiKey ? 1 : 0.98 }}
+            whileTap={{ scale: isRunning || (!isSimulator && !apiKey) ? 1 : 0.98 }}
           >
             {isRunning ? (
                 <>
@@ -155,11 +179,11 @@ const HardwarePanel: React.FC<HardwarePanelProps> = ({ onRunOnHardware, isRunnin
                     <span>Processing...</span>
                 </>
             ) : (
-                `Run on ${selectedBackend.name}`
+                isSimulator ? "Run Simulation" : `Run on ${selectedBackend.name}`
             )}
           </motion.button>
            <p className="text-center text-xs text-gray-600 mt-3">
-             Connects to a live quantum backend via a secure gateway.
+             {isSimulator ? "Runs on a classical simulator (No API Key required)." : "Connects to a live quantum backend via a secure gateway."}
            </p>
       </div>
     </motion.div>

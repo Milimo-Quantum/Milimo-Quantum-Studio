@@ -4,7 +4,7 @@ import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import CircuitCanvas from './components/CircuitCanvas';
 import RightPanel from './components/RightPanel';
-import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus, ReplaceCircuitPayload } from './types';
+import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus, ReplaceCircuitPayload, Backend } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
 import { getAgentResponse, getTutorResponse, generateQiskitCode, generateCirqCode, managerSystemInstruction } from './services/geminiService';
@@ -108,6 +108,7 @@ export const App: React.FC = () => {
   const [hardwareResult, setHardwareResult] = useState<SimulationResult | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus>('idle');
+  const [runningBackend, setRunningBackend] = useState<Backend | null>(null);
   const pollingIntervalRef = useRef<number | null>(null);
 
 
@@ -711,12 +712,13 @@ export const App: React.FC = () => {
   }, [placedItems, selectedItemIds, state, customGateDefinitions, setState]);
 
   // --- Asynchronous Hardware Job Submission ---
-  const handleRunOnHardware = useCallback(async (apiKey: string, backend: { name: string, provider: 'ibm' | 'google' }) => {
+  const handleRunOnHardware = useCallback(async (apiKey: string, backend: Backend) => {
     if (jobStatus === 'submitted' || jobStatus === 'queued' || jobStatus === 'running') return;
     
     setJobStatus('submitted');
     setJobId(null);
     setHardwareResult(null);
+    setRunningBackend(backend);
     setActiveTab('visualization');
 
     try {
@@ -730,7 +732,9 @@ export const App: React.FC = () => {
         console.log(`Submitting job to ${backend.provider} (${backend.name})... payload generated.`); 
         
         // Simulate backend delay
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Simulators are faster than QPUs
+        const delay = backend.type === 'simulator' ? 800 : 2500;
+        await new Promise(resolve => setTimeout(resolve, delay));
         const newJobId = `mqs-job-${Date.now()}`;
 
         setJobId(newJobId);
@@ -754,17 +758,38 @@ export const App: React.FC = () => {
     
     const fetchJobResult = async (id: string) => {
       try {
-        // Simulate noisy result
-        const hardwareNoiseModel = { depolarizing: 0.01, phaseDamping: 0.02 };
-        const simResult = simulate(placedItems, numQubits, customGateDefinitions, hardwareNoiseModel);
+        const isSimulator = runningBackend?.type === 'simulator';
+        // If simulator: Run ideal simulation (noise = 0)
+        // If QPU: Run noisy simulation (mock hardware noise)
+        const noiseConfig = isSimulator 
+            ? { depolarizing: 0, phaseDamping: 0 } 
+            : { depolarizing: 0.01, phaseDamping: 0.02 };
+
+        const simResult = simulate(placedItems, numQubits, customGateDefinitions, noiseConfig);
         const shots = 1024;
-        const counts = simResult.probabilities.reduce((acc, p) => {
-            const state = p.state.replace(/[|⟩]/g, '');
-            acc[state] = Math.round(p.value * shots);
-            return acc;
-        }, {} as {[key: string]: number});
-        const result = countsToSimulationResult(counts, numQubits);
         
+        // Sample from probabilities to get counts (Shot Noise)
+        const counts: {[key: string]: number} = {};
+        // Initialize counts
+        simResult.probabilities.forEach(p => {
+             const state = p.state.replace(/[|⟩]/g, '');
+             counts[state] = 0;
+        });
+
+        // Monte Carlo sampling for shots
+        for (let i = 0; i < shots; i++) {
+            let r = Math.random();
+            for (const p of simResult.probabilities) {
+                r -= p.value;
+                if (r <= 0) {
+                    const state = p.state.replace(/[|⟩]/g, '');
+                    counts[state] = (counts[state] || 0) + 1;
+                    break;
+                }
+            }
+        }
+
+        const result = countsToSimulationResult(counts, numQubits);
         setHardwareResult(result);
       } catch (error) {
         console.error('Error fetching job result:', error);
@@ -779,6 +804,9 @@ export const App: React.FC = () => {
     }
 
     if (!pollingIntervalRef.current) {
+      // Polling interval faster for local simulator
+      const interval = runningBackend?.type === 'simulator' ? 1000 : 4000;
+      
       pollingIntervalRef.current = window.setInterval(async () => {
         try {
             setJobStatus(currentStatus => {
@@ -803,11 +831,11 @@ export const App: React.FC = () => {
             setJobStatus('error');
             clearPolling();
         }
-      }, 4000);
+      }, interval);
     }
 
     return clearPolling;
-  }, [jobId, jobStatus, placedItems, numQubits, customGateDefinitions]);
+  }, [jobId, jobStatus, placedItems, numQubits, customGateDefinitions, runningBackend]);
 
 
   const isHardwareRunning = jobStatus === 'submitted' || jobStatus === 'queued' || jobStatus === 'running';

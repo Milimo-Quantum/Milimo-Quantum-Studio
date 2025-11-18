@@ -117,3 +117,11 @@ export interface SimulationResult {
 
 // Hardware Job Types
 export type JobStatus = 'idle' | 'submitted' | 'queued' | 'running' | 'completed' | 'error';
+
+export interface Backend {
+    name: string;
+    provider: 'ibm' | 'google';
+    qubits: number;
+    status: 'online' | 'maintenance' | 'offline';
+    type: 'qpu' | 'simulator';
+}
