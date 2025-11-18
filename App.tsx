@@ -7,7 +7,7 @@ import RightPanel from './components/RightPanel';
 import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus, ReplaceCircuitPayload } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
-import { getAgentResponse, getTutorResponse, generateQiskitCode, managerSystemInstruction } from './services/geminiService';
+import { getAgentResponse, getTutorResponse, generateQiskitCode, generateCirqCode, managerSystemInstruction } from './services/geminiService';
 import { simulate } from './services/quantumSimulator';
 import { gateMap } from './data/gates';
 import { useHistory } from './hooks/useHistory';
@@ -711,7 +711,7 @@ export const App: React.FC = () => {
   }, [placedItems, selectedItemIds, state, customGateDefinitions, setState]);
 
   // --- Asynchronous Hardware Job Submission ---
-  const handleRunOnHardware = useCallback(async (apiKey: string, backendName: string) => {
+  const handleRunOnHardware = useCallback(async (apiKey: string, backend: { name: string, provider: 'ibm' | 'google' }) => {
     if (jobStatus === 'submitted' || jobStatus === 'queued' || jobStatus === 'running') return;
     
     setJobStatus('submitted');
@@ -720,7 +720,14 @@ export const App: React.FC = () => {
     setActiveTab('visualization');
 
     try {
-        const rawCode = generateQiskitCode(placedItems, customGateDefinitions, numQubits, { highlight: false });
+        let rawCode = '';
+        if (backend.provider === 'google') {
+             rawCode = generateCirqCode(placedItems, customGateDefinitions, numQubits, { highlight: false });
+        } else {
+             rawCode = generateQiskitCode(placedItems, customGateDefinitions, numQubits, { highlight: false });
+        }
+        
+        console.log(`Submitting job to ${backend.provider} (${backend.name})... payload generated.`); 
         
         // Simulate backend delay
         await new Promise(resolve => setTimeout(resolve, 1500));

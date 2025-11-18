@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import CopilotChat from './CopilotChat';
@@ -24,7 +25,7 @@ interface RightPanelProps {
   setPhaseDampingError: (value: number) => void;
   hardwareResult: SimulationResult | null;
   isHardwareRunning: boolean;
-  onRunOnHardware: (apiKey: string, backendName: string) => void;
+  onRunOnHardware: (apiKey: string, backend: { name: string, provider: 'ibm' | 'google' }) => void;
   jobId: string | null;
   jobStatus: JobStatus;
 }
