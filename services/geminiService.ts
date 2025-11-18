@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, FunctionDeclaration, Type, Content, Part, Chat } from "@google/genai";
 import type { AIResponse, AgentStatusUpdate, PlacedGate, AIAction, Message, SimulationResult, Source, AddGatePayload, PlacedItem, CustomGateDefinition } from "../types";
 import { gateMap, gates } from "../data/gates";
@@ -341,7 +342,7 @@ ${userPromptText}
         onStatusUpdate({ agent: 'Debugger', status: 'completed', message: 'Debug analysis complete.' });
         return { 
             displayText: executionContext.explanationText, 
-            actions: executionContext.designActions,
+            actions: executionContext.designActions, 
             sources: executionContext.sources 
         };
     }
@@ -553,7 +554,7 @@ export const getTutorResponse = async (
 };
 
 
-// --- Code Generation ---
+// --- Qiskit Code Generation ---
 const qiskitMethodMap: Record<string, (g: PlacedGate) => string | null> = { 
     'h': g => `qc.h(${g.qubit})`, 
     'x': g => `qc.x(${g.qubit})`, 
@@ -571,10 +572,10 @@ const qiskitMethodMap: Record<string, (g: PlacedGate) => string | null> = {
     'swap': g => g.controlQubit !== undefined ? `qc.swap(${g.qubit}, ${g.controlQubit})` : null, 
     'measure': g => `qc.measure(${g.qubit}, ${g.qubit})`, 
 };
-const methodNames = Object.keys(qiskitMethodMap).join('|').replace('cnot', 'cx');
+const qiskitMethodNames = Object.keys(qiskitMethodMap).join('|').replace('cnot', 'cx');
 
-const highlightCode = (code: string): string => {
-    const methodRegex = new RegExp(`(\\.(?:${methodNames}|append|run|get_counts)\\()`, 'g');
+const highlightQiskitCode = (code: string): string => {
+    const methodRegex = new RegExp(`(\\.(?:${qiskitMethodNames}|append|run|get_counts)\\()`, 'g');
     return code
         .replace(/(from|import|as|print)/g, '<span class="text-purple-400">$&</span>')
         .replace(/(QuantumCircuit|NoiseModel|AerSimulator|depolarizing_error|phase_damping_error)/g, '<span class="text-sky-400">$&</span>')
@@ -663,5 +664,110 @@ export const generateQiskitCode = (
     }
 
     const fullCode = imports + '\n' + code;
-    return highlight ? highlightCode(fullCode) : fullCode;
+    return highlight ? highlightQiskitCode(fullCode) : fullCode;
+};
+
+
+// --- Cirq Code Generation ---
+const cirqMethodMap: Record<string, (g: PlacedGate) => string | null> = {
+    'h': g => `cirq.H(qubits[${g.qubit}])`,
+    'x': g => `cirq.X(qubits[${g.qubit}])`,
+    'y': g => `cirq.Y(qubits[${g.qubit}])`,
+    'z': g => `cirq.Z(qubits[${g.qubit}])`,
+    'rx': g => `cirq.rx(${g.params?.theta || 0})(qubits[${g.qubit}])`,
+    'ry': g => `cirq.ry(${g.params?.theta || 0})(qubits[${g.qubit}])`,
+    'rz': g => `cirq.rz(${g.params?.theta || 0})(qubits[${g.qubit}])`,
+    's': g => `cirq.S(qubits[${g.qubit}])`,
+    'sdg': g => `cirq.Z(qubits[${g.qubit}])**-0.5`, // S dagger
+    't': g => `cirq.T(qubits[${g.qubit}])`,
+    'tdg': g => `cirq.T(qubits[${g.qubit}])**-1`,
+    'cnot': g => g.controlQubit !== undefined ? `cirq.CNOT(qubits[${g.controlQubit}], qubits[${g.qubit}])` : null,
+    'cz': g => g.controlQubit !== undefined ? `cirq.CZ(qubits[${g.controlQubit}], qubits[${g.qubit}])` : null,
+    'swap': g => g.controlQubit !== undefined ? `cirq.SWAP(qubits[${g.qubit}], qubits[${g.controlQubit}])` : null,
+    'measure': g => `cirq.measure(qubits[${g.qubit}], key='q${g.qubit}')`,
+};
+
+const highlightCirqCode = (code: string): string => {
+    return code
+        .replace(/(import|as|print)/g, '<span class="text-purple-400">$&</span>')
+        .replace(/(cirq|np)/g, '<span class="text-sky-400">$&</span>')
+        .replace(/\b(circuit|qubits|simulator|result|frequencies)\b/g, '<span class="text-yellow-400">$&</span>')
+        .replace(/(\.(?:H|X|Y|Z|rx|ry|rz|S|T|CNOT|CZ|SWAP|measure|append|run|histogram)\()/g, '<span class="text-cyan-400">$&</span>')
+        .replace(/(#.*)/g, '<span class="text-gray-500">$&</span>');
+};
+
+export const generateCirqCode = (
+    placedItems: PlacedItem[],
+    customGateDefs: CustomGateDefinition[],
+    numQubits: number,
+    options: {
+        noiseModel?: { depolarizing: number, phaseDamping: number },
+        highlight?: boolean
+    } = {}
+): string => {
+    const { noiseModel, highlight = true } = options;
+
+    const unrolledGates = unrollCircuit(placedItems, customGateDefs);
+    const sortedGates = unrolledGates.sort((a, b) => a.left - b.left);
+
+    let imports = `import cirq\nimport numpy as np\n`;
+    if (sortedGates.some(g => ['pi'].some(p => g.params?.theta?.includes(p)))) {
+        imports += `from numpy import pi\n`;
+    }
+
+    let code = `# Create ${numQubits} qubits\n`;
+    code += `qubits = cirq.LineQubit.range(${numQubits})\n\n`;
+    code += `# Initialize the circuit\n`;
+    code += `circuit = cirq.Circuit()\n\n`;
+
+    if (sortedGates.length > 0) code += `# Add gates to the circuit\n`;
+    
+    for (const gate of sortedGates) {
+        const generator = cirqMethodMap[gate.gateId];
+        if (generator) {
+            const line = generator(gate);
+            if (line) {
+                code += `circuit.append(${line})\n`;
+                
+                // Apply noise immediately after each gate if requested
+                // Note: This is a simplified noise application for code generation demonstration
+                if (noiseModel) {
+                    const affectedQubits = [gate.qubit, gate.controlQubit].filter(q => q !== undefined) as number[];
+                    
+                    if (noiseModel.depolarizing > 0) {
+                        const p = noiseModel.depolarizing;
+                        // Apply depolarizing to all qubits involved
+                        for (const q of affectedQubits) {
+                             code += `circuit.append(cirq.depolarize(${p}).on(qubits[${q}]))\n`;
+                        }
+                    }
+                    
+                     if (noiseModel.phaseDamping > 0) {
+                        const gamma = noiseModel.phaseDamping;
+                         for (const q of affectedQubits) {
+                             code += `circuit.append(cirq.phase_damp(${gamma}).on(qubits[${q}]))\n`;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    code += `\n# Print the circuit diagram\n`;
+    code += `print("Circuit:")\n`;
+    code += `print(circuit)\n`;
+    
+    code += `\n# --- Simulation Execution ---\n`;
+    if (noiseModel && (noiseModel.depolarizing > 0 || noiseModel.phaseDamping > 0)) {
+         code += `simulator = cirq.DensityMatrixSimulator()\n`;
+    } else {
+         code += `simulator = cirq.Simulator()\n`;
+    }
+    code += `result = simulator.run(circuit, repetitions=1024)\n`;
+    code += `\n# Get measurement results\n`;
+    code += `frequencies = result.histogram(key='q') # Note: Keys may vary based on measurements\n`;
+    code += `print(f"Measurement Results: {frequencies}")\n`;
+
+    const fullCode = imports + '\n' + code;
+    return highlight ? highlightCirqCode(fullCode) : fullCode;
 };
