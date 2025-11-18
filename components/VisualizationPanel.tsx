@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { motion, useMotionValue, useSpring, AnimatePresence } from 'framer-motion';
+import { motion, useSpring, useTransform, AnimatePresence } from 'framer-motion';
 import type { SimulationResult } from '../types';
 import LogoIcon from './icons/LogoIcon';
 import NoiseIcon from './icons/NoiseIcon';
@@ -10,27 +10,116 @@ const RADIUS = SPHERE_SIZE / 2;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
+const toSpherical = (x: number, y: number, z: number) => {
+    const r = Math.sqrt(x*x + y*y + z*z);
+    if (r === 0) return { theta: 0, phi: 0, r: 0 };
+    
+    const clampedZ = clamp(z / r, -1, 1);
+    const theta = Math.acos(clampedZ); // Polar angle (from z-axis) 0 to PI
+    const phi = Math.atan2(y, x); // Azimuthal angle -PI to PI
+    
+    return { theta, phi, r };
+};
+
+// Helper to get shortest rotation path for phi to avoid spinning the long way
+const getShortestDelta = (start: number, end: number) => {
+    let delta = end - start;
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    while (delta < -Math.PI) delta += 2 * Math.PI;
+    return delta;
+};
+
+const GhostVector: React.FC<{ theta: number, phi: number, opacity: number, r: number }> = ({ theta, phi, opacity, r }) => (
+    <motion.div
+        className="absolute top-1/2 left-1/2 w-0.5 origin-top bg-cyan-400/50 pointer-events-none"
+        initial={{ opacity: 0 }}
+        animate={{ opacity }}
+        exit={{ opacity: 0 }}
+        style={{
+            height: RADIUS * r,
+            transformStyle: 'preserve-3d',
+            transform: `rotateZ(${phi}rad) rotateY(${theta}rad)`,
+            boxShadow: `0 0 8px rgba(34, 211, 238, ${opacity})`
+        }}
+    />
+);
+
+
 const BlochSphere: React.FC<{ x: number; y: number; z: number }> = ({ x, y, z }) => {
   const [isDragging, setIsDragging] = useState(false);
   const sphereRef = useRef<HTMLDivElement>(null);
   
-  const rotX = useSpring(0, { stiffness: 300, damping: 30 });
-  const rotY = useSpring(0, { stiffness: 300, damping: 30 });
+  // View rotation (user dragging)
+  const viewRotX = useSpring(0, { stiffness: 300, damping: 30 });
+  const viewRotY = useSpring(0, { stiffness: 300, damping: 30 });
 
+  // Vector animation state
+  const vectorTheta = useSpring(0, { stiffness: 120, damping: 14 });
+  const vectorPhi = useSpring(0, { stiffness: 120, damping: 14 });
+  const vectorLength = useSpring(0, { stiffness: 120, damping: 14 });
+  
+  // Transform length to percentage for height style
+  const vectorHeight = useTransform(vectorLength, (l) => `${l * 100}%`);
+
+  // Ghost trails state
+  const [ghosts, setGhosts] = useState<Array<{theta: number, phi: number, id: number}>>([]);
+
+  // Internal refs to track previous state for interpolation
+  const prevCoords = useRef({ theta: 0, phi: 0 });
+  
   useEffect(() => {
     // Initial orientation
-    rotX.set(-25);
-    rotY.set(25);
+    viewRotX.set(-25);
+    viewRotY.set(25);
   }, []);
+
+  useEffect(() => {
+      const { theta, phi, r } = toSpherical(x, y, z);
+      
+      // Calculate shortest path for Phi
+      const currentPhi = prevCoords.current.phi;
+      const deltaPhi = getShortestDelta(currentPhi, phi);
+      const targetPhi = currentPhi + deltaPhi;
+
+      // Generate ghosts if the move is significant
+      const dist = Math.abs(deltaPhi) + Math.abs(theta - prevCoords.current.theta);
+      
+      if (dist > 0.1) {
+          const numGhosts = 5;
+          const newGhosts = [];
+          for(let i = 1; i < numGhosts; i++) {
+              const t = i / numGhosts;
+              newGhosts.push({
+                  theta: prevCoords.current.theta + (theta - prevCoords.current.theta) * t,
+                  phi: currentPhi + deltaPhi * t,
+                  id: Date.now() + i
+              });
+          }
+          setGhosts(newGhosts);
+          
+          // Clear ghosts after animation
+          setTimeout(() => setGhosts([]), 400);
+      }
+
+      // Update springs
+      vectorTheta.set(theta);
+      vectorPhi.set(targetPhi);
+      vectorLength.set(r);
+      
+      // Update ref (normalize phi back to -PI, PI range for stability)
+      prevCoords.current = { theta, phi }; // Store canonical phi for next calc
+
+  }, [x, y, z]);
+
 
   const handlePointerDown = (e: React.PointerEvent) => {
     setIsDragging(true);
-    const startX = e.pageX - rotY.get();
-    const startY = e.pageY - rotX.get();
+    const startX = e.pageX - viewRotY.get();
+    const startY = e.pageY - viewRotX.get();
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
-        rotY.set(moveEvent.pageX - startX);
-        rotX.set(moveEvent.pageY - startY);
+        viewRotY.set(moveEvent.pageX - startX);
+        viewRotX.set(moveEvent.pageY - startY);
     };
 
     const handlePointerUp = () => {
@@ -42,13 +131,6 @@ const BlochSphere: React.FC<{ x: number; y: number; z: number }> = ({ x, y, z })
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
   };
-
-  const vectorLength = Math.sqrt(x * x + y * y + z * z);
-  // Spherical coordinates from Cartesian
-  const phi = Math.atan2(y, x);
-  
-  const clampedZ = clamp(z / (vectorLength || 1), -1, 1);
-  const theta = Math.acos(clampedZ); // Polar angle (from z-axis)
 
   return (
     <div
@@ -63,8 +145,8 @@ const BlochSphere: React.FC<{ x: number; y: number; z: number }> = ({ x, y, z })
           width: SPHERE_SIZE,
           height: SPHERE_SIZE,
           transformStyle: 'preserve-3d',
-          rotateX: rotX,
-          rotateY: rotY,
+          rotateX: viewRotX,
+          rotateY: viewRotY,
         }}
       >
         {/* Sphere body */}
@@ -81,40 +163,45 @@ const BlochSphere: React.FC<{ x: number; y: number; z: number }> = ({ x, y, z })
         {/* Prime Meridian */}
         <div className="absolute inset-0 rounded-full border border-cyan-400/20" />
         
+        {/* Ghost Trails */}
+        <AnimatePresence>
+            {ghosts.map(g => (
+                <GhostVector key={g.id} theta={g.theta} phi={g.phi} opacity={0.3} r={1} />
+            ))}
+        </AnimatePresence>
+
         {/* State Vector */}
         <motion.div
           className="absolute top-1/2 left-1/2 w-1 origin-top"
           style={{
             transformStyle: 'preserve-3d',
             height: RADIUS,
+            rotateZ: vectorPhi, // Use spring values directly
+            rotateY: vectorTheta,
           }}
-          initial={{ rotateZ: 0, rotateY: 0 }}
-          animate={{
-              rotateZ: phi * (180 / Math.PI),
-              rotateY: theta * (180 / Math.PI),
-          }}
-          transition={{type: 'spring', stiffness: 200, damping: 20}}
         >
             <motion.div
-                className="w-full bg-gradient-to-t from-purple-400 to-purple-300"
-                style={{ transformStyle: 'preserve-3d' }}
-                initial={{height: '100%'}}
-                animate={{height: `${vectorLength * 100}%`}}
-                transition={{type: 'spring', stiffness: 200, damping: 20}}
+                className="w-full bg-gradient-to-t from-purple-500 via-purple-400 to-white"
+                style={{ 
+                    transformStyle: 'preserve-3d',
+                    boxShadow: '0 0 10px rgba(168, 85, 247, 0.5)',
+                    height: vectorHeight
+                }}
+                initial={{height: '0%'}}
             >
               {/* Arrowhead */}
               <div
-                className="absolute -top-px left-1/2 w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-b-[8px] border-b-purple-200"
+                className="absolute -top-px left-1/2 w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-b-[8px] border-b-white"
                 style={{ transform: 'translateX(-50%) rotateX(90deg) translateZ(5px)'}}
               />
             </motion.div>
         </motion.div>
 
         {/* Labels */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-full text-cyan-300 text-xs">|0⟩</div>
-        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full text-cyan-300 text-xs">|1⟩</div>
-        <div className="absolute top-1/2 -translate-y-1/2 left-0 -translate-x-full text-gray-500 text-xs">|-⟩</div>
-        <div className="absolute top-1/2 -translate-y-1/2 right-0 translate-x-full text-gray-500 text-xs">|+⟩</div>
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-full text-cyan-300 text-xs font-mono font-bold">|0⟩</div>
+        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full text-cyan-300 text-xs font-mono font-bold">|1⟩</div>
+        <div className="absolute top-1/2 -translate-y-1/2 left-0 -translate-x-full text-gray-500 text-xs font-mono">|-⟩</div>
+        <div className="absolute top-1/2 -translate-y-1/2 right-0 translate-x-full text-gray-500 text-xs font-mono">|+⟩</div>
 
       </motion.div>
     </div>
@@ -156,7 +243,7 @@ const ProbabilityBars: React.FC<{ probabilities: SimulationResult['probabilities
     <div className="space-y-2">
         {probabilities.map(p => (
             <div key={p.state} className="flex items-center gap-3">
-                <span className="w-20 text-right text-gray-500">{p.state}</span>
+                <span className="w-20 text-right text-gray-500 font-mono">{p.state}</span>
                 <div className="flex-grow bg-gray-700/50 rounded-full h-4 overflow-hidden">
                     <motion.div
                         className="bg-gradient-to-r from-cyan-500 to-blue-500 h-full"
@@ -165,11 +252,45 @@ const ProbabilityBars: React.FC<{ probabilities: SimulationResult['probabilities
                         transition={{ duration: 0.5, ease: 'easeOut' }}
                     />
                 </div>
-                <span className="w-12 text-left">{`${(p.value * 100).toFixed(1)}%`}</span>
+                <span className="w-12 text-left font-mono">{`${(p.value * 100).toFixed(1)}%`}</span>
             </div>
         ))}
     </div>
 );
+
+const StateDisplay: React.FC<{ x: number, y: number, z: number }> = ({ x, y, z }) => {
+    // Approximate alpha/beta from Bloch coordinates for pure states
+    // r, theta, phi were calculated in BlochSphere, but we recalculate here for the text display
+    const { theta, phi } = toSpherical(x, y, z);
+    
+    // |psi> = cos(theta/2)|0> + e^(i*phi)sin(theta/2)|1>
+    const alphaRe = Math.cos(theta / 2);
+    const betaMag = Math.sin(theta / 2);
+    // e^(i*phi) = cos(phi) + i*sin(phi)
+    const betaRe = betaMag * Math.cos(phi);
+    const betaIm = betaMag * Math.sin(phi);
+
+    const formatComplex = (re: number, im: number) => {
+        const reStr = Math.abs(re) < 0.001 ? '0' : re.toFixed(2);
+        const imStr = Math.abs(im) < 0.001 ? '0' : Math.abs(im).toFixed(2);
+        const sign = im < 0 ? '-' : '+';
+        
+        if (reStr === '0' && imStr === '0') return '0';
+        if (reStr === '0') return `${sign === '-' ? '-' : ''}${imStr}i`;
+        if (imStr === '0') return reStr;
+        return `${reStr} ${sign} ${imStr}i`;
+    };
+
+    return (
+        <div className="bg-gray-800/40 border border-purple-500/20 rounded-lg p-3 text-center">
+            <p className="text-xs text-gray-500 mb-1 uppercase tracking-wider">State Vector Approximation</p>
+            <div className="font-mono text-sm text-purple-200">
+                |ψ⟩ ≈ <span className="text-white">{formatComplex(alphaRe, 0)}</span>|0⟩ + <span className="text-white">{formatComplex(betaRe, betaIm)}</span>|1⟩
+            </div>
+             <p className="text-[10px] text-gray-600 mt-1">Global phase ignored</p>
+        </div>
+    )
+}
 
 
 interface VisualizationPanelProps {
@@ -211,19 +332,33 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
       ) : (
         <>
             <div>
-                <h3 className="text-gray-400 mb-1">Bloch Sphere (q[{visualizedQubit}])</h3>
-                <p className="text-xs text-gray-500 mb-3">Purity: {visualizedQubitState?.purity.toFixed(3)}</p>
-                <div className="w-full aspect-square bg-gray-800/20 border border-gray-600/30 rounded-lg flex items-center justify-center p-4">
-                    {visualizedQubitState && <BlochSphere {...visualizedQubitState.blochSphereCoords} />}
+                <div className="flex justify-between items-end mb-2">
+                    <h3 className="text-gray-400">Bloch Sphere (q[{visualizedQubit}])</h3>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${visualizedQubitState && visualizedQubitState.purity > 0.99 ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
+                        Purity: {visualizedQubitState?.purity.toFixed(3)}
+                    </span>
                 </div>
-                <p className="text-center text-xs text-gray-500 mt-2">Click and drag to rotate the sphere.</p>
+                
+                <div className="w-full bg-gray-800/20 border border-gray-600/30 rounded-lg flex flex-col items-center justify-center p-6 gap-4 relative overflow-hidden">
+                    {/* Subtle background grid for 3D feel */}
+                    <div className="absolute inset-0 opacity-10 pointer-events-none" 
+                         style={{ backgroundImage: 'radial-gradient(circle at center, #444 1px, transparent 1px)', backgroundSize: '20px 20px' }} 
+                    />
+                    
+                    {visualizedQubitState && <BlochSphere {...visualizedQubitState.blochSphereCoords} />}
+                    
+                    {visualizedQubitState && (
+                        <StateDisplay {...visualizedQubitState.blochSphereCoords} />
+                    )}
+                </div>
+                <p className="text-center text-xs text-gray-500 mt-2">The vector traces its path when gates change.</p>
             </div>
 
             <div>
-                 <button onClick={() => setIsNoisePanelOpen(p => !p)} className="w-full flex justify-between items-center text-gray-400 mb-3">
+                 <button onClick={() => setIsNoisePanelOpen(p => !p)} className="w-full flex justify-between items-center text-gray-400 mb-3 group hover:text-white transition-colors">
                     <div className="flex items-center gap-2">
                         <NoiseIcon className="w-4 h-4" />
-                        Noise Models (for Ideal Simulation)
+                        Noise Models (Realism)
                     </div>
                      <svg className={`w-4 h-4 transition-transform ${isNoisePanelOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                  </button>
@@ -256,8 +391,8 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
 
              <div>
                 <h3 className="text-gray-400 mb-3">Measurement Probabilities</h3>
-                <div className="border border-gray-500/20 rounded-lg p-4">
-                    <h4 className="text-xs text-cyan-300 mb-3">Ideal Simulation</h4>
+                <div className="border border-gray-500/20 rounded-lg p-4 bg-black/20">
+                    <h4 className="text-xs text-cyan-300 mb-3 uppercase tracking-wider">Ideal Simulation</h4>
                     <ProbabilityBars probabilities={result.probabilities} />
 
                     <AnimatePresence>
@@ -269,14 +404,14 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
                             className="mt-4"
                         >
                             <div className="h-px bg-gray-700/50 my-4"></div>
-                            <h4 className="text-xs text-purple-300 mb-3">Hardware Run Results</h4>
+                            <h4 className="text-xs text-purple-300 mb-3 uppercase tracking-wider">Hardware Run Results</h4>
                             {isHardwareRunning && !hardwareResult && (
                                 <div className="flex items-center justify-center h-24 text-gray-500">
                                     <div className="flex gap-1.5 items-center">
                                         <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.3s]"></span>
                                         <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.15s]"></span>
                                         <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse"></span>
-                                        <span className="ml-2">Running on noisy backend...</span>
+                                        <span className="ml-2 text-xs">Running on noisy backend...</span>
                                     </div>
                                 </div>
                             )}

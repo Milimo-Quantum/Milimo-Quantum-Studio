@@ -1,3 +1,4 @@
+
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
@@ -80,6 +81,11 @@ export const App: React.FC = () => {
   const [visualizedQubit, setVisualizedQubit] = useState<number>(0);
   const [simulationStep, setSimulationStep] = useState<number | null>(null);
   
+  // --- Keyboard Navigation State ---
+  const [cursorPosition, setCursorPosition] = useState<{ qubit: number, gridIndex: number } | null>(null);
+  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+
+
   const [messages, setMessages] = useState<Message[]>([
     { type: 'text', sender: 'ai', text: "Hello! I'm Milimo AI. You can give me complex challenges like 'build a quantum teleportation circuit' or give me step-by-step instructions like 'add a Hadamard to qubit 0'." },
   ]);
@@ -193,8 +199,9 @@ export const App: React.FC = () => {
   }, [placedItems, numQubits, isTutorModeActive]);
 
 
-  // --- Item Selection & Deletion ---
+  // --- Item Selection & Deletion & Keyboard Nav ---
   const handleSelectItem = (instanceId: string, isShiftPressed: boolean) => {
+    setCursorPosition(null); // Clear cursor on mouse select
     setSelectedItemIds(prevIds => {
       if (isShiftPressed) {
         // Toggle selection
@@ -207,6 +214,10 @@ export const App: React.FC = () => {
   
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      // If Quick Add is open, let it handle keys (except Escape which is handled here too potentially, but usually component handles it)
+      if (isQuickAddOpen) return;
+
+      // Deletion
       if ((event.key === 'Backspace' || event.key === 'Delete') && selectedItemIds.length > 0) {
         setState({
           ...state,
@@ -214,6 +225,7 @@ export const App: React.FC = () => {
         });
         setSelectedItemIds([]);
       }
+       
        // Undo/Redo shortcuts
       if ((event.metaKey || event.ctrlKey) && event.key === 'z') {
         event.preventDefault();
@@ -227,10 +239,117 @@ export const App: React.FC = () => {
         event.preventDefault();
         redo();
       }
+      
+      // --- Phase 3: Navigation & Manipulation ---
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+          // Manipulation Mode (Items selected)
+          if (selectedItemIds.length > 0) {
+             event.preventDefault(); // Prevent scroll
+             const shift = event.shiftKey;
+             const deltaLeft = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+             const deltaQubit = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0;
+             
+             setState({
+                 ...state,
+                 placedItems: state.placedItems.map(item => {
+                     if (selectedItemIds.includes(item.instanceId)) {
+                         let newQubit = item.qubit;
+                         if (shift) newQubit = Math.max(0, Math.min(numQubits - 1, newQubit + deltaQubit));
+                         
+                         let newLeft = item.left;
+                         if (!shift && deltaLeft !== 0) newLeft = Math.max(0, Math.min(100, newLeft + deltaLeft * 2)); // Nudge
+                         
+                         // Basic Control Qubit logic update (simple shift)
+                         let newControl = ('gateId' in item && item.controlQubit !== undefined) ? item.controlQubit : undefined;
+                         if(shift && newControl !== undefined) newControl = Math.max(0, Math.min(numQubits -1, newControl + deltaQubit));
+
+                         return { ...item, qubit: newQubit, left: newLeft, controlQubit: newControl };
+                     }
+                     return item;
+                 })
+             });
+             return;
+          }
+          
+          // Navigation Mode (Cursor)
+          event.preventDefault();
+          setCursorPosition(prev => {
+              if (!prev) return { qubit: 0, gridIndex: 0 };
+              let newQubit = prev.qubit;
+              let newGridIndex = prev.gridIndex;
+
+              if (event.key === 'ArrowUp') newQubit = Math.max(0, newQubit - 1);
+              if (event.key === 'ArrowDown') newQubit = Math.min(numQubits - 1, newQubit + 1);
+              if (event.key === 'ArrowLeft') newGridIndex = Math.max(0, newGridIndex - 1);
+              if (event.key === 'ArrowRight') newGridIndex = Math.min(9, newGridIndex + 1); // 10 columns
+              
+              return { qubit: newQubit, gridIndex: newGridIndex };
+          });
+      }
+
+      if (event.key === 'Enter') {
+          if (cursorPosition && !isQuickAddOpen) {
+              event.preventDefault();
+              setIsQuickAddOpen(true);
+          } else if (!cursorPosition && selectedItemIds.length === 0) {
+              // If nothing selected and no cursor, start at 0,0
+               setCursorPosition({ qubit: 0, gridIndex: 0 });
+          }
+      }
+
+      if (event.key === 'Escape') {
+          if (isQuickAddOpen) {
+              setIsQuickAddOpen(false);
+          } else if (selectedItemIds.length > 0) {
+              setSelectedItemIds([]);
+          } else if (cursorPosition) {
+              setCursorPosition(null);
+          }
+      }
     };
+    
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedItemIds, state, setState, undo, redo]);
+  }, [selectedItemIds, state, setState, undo, redo, isQuickAddOpen, cursorPosition, numQubits]);
+
+  const handleQuickAddSelect = (gateId: string) => {
+      if (!cursorPosition) return;
+      
+      const gateInfo = gateMap.get(gateId);
+      if (!gateInfo) return;
+
+      const left = cursorPosition.gridIndex * 10 + 5; // Center in the 10% cell
+      
+      const newGate: PlacedGate = {
+          instanceId: `${gateId}-${Date.now()}`,
+          gateId: gateId,
+          qubit: cursorPosition.qubit,
+          left: left,
+          params: gateInfo.params ? Object.fromEntries(gateInfo.params.map(p => [p, 'pi'])) : undefined
+      };
+
+      if (gateInfo.type === 'control') {
+           // Smart placement for control gates
+           let controlIndex;
+           if (cursorPosition.qubit < numQubits - 1) {
+               controlIndex = cursorPosition.qubit + 1;
+           } else {
+               controlIndex = cursorPosition.qubit - 1;
+           }
+           if(gateInfo.id === 'swap') {
+               newGate.controlQubit = controlIndex;
+           } else {
+               newGate.qubit = controlIndex;
+               newGate.controlQubit = cursorPosition.qubit;
+           }
+      }
+
+      setState({
+          ...state,
+          placedItems: [...state.placedItems, newGate]
+      });
+      setIsQuickAddOpen(false);
+  };
 
   const handleNumQubitsChange = useCallback((newNumQubits: number) => {
     if (newNumQubits >= 2 && newNumQubits <= 5) {
@@ -240,6 +359,7 @@ export const App: React.FC = () => {
         placedItems: [] // Clear circuit on qubit change
       });
       setSelectedItemIds([]);
+      setCursorPosition(null); // Clear cursor
       if (visualizedQubit >= newNumQubits) {
         setVisualizedQubit(0);
       }
@@ -410,6 +530,7 @@ export const App: React.FC = () => {
     setState({ ...state, placedItems: [] });
     setSelectedItemIds([]);
     setSimulationStep(null);
+    setCursorPosition(null);
   }, [state, setState]);
 
   const handleShowVisualization = useCallback(() => {
@@ -426,6 +547,7 @@ export const App: React.FC = () => {
   const handleComponentDrop = (componentId: string, point: { x: number; y: number }) => {
     if (!canvasRef.current) return;
     setSelectedItemIds([]);
+    setCursorPosition(null);
 
     const canvasRect = canvasRef.current.getBoundingClientRect();
     if (
@@ -452,7 +574,7 @@ export const App: React.FC = () => {
               gateId: componentId,
               qubit: qubitIndex,
               left: leftPercent,
-              params: gateInfo.params ? Object.fromEntries(gateInfo.params.map(p => [p, 'pi'])) : undefined // Default params
+              params: gateInfo.params ? Object.fromEntries(gateInfo.params.map(p => [p, 'pi'])) : undefined
           };
 
           if (gateInfo?.type === 'control') {
@@ -466,13 +588,12 @@ export const App: React.FC = () => {
               if(gateInfo.id === 'swap') {
                   newGate.controlQubit = controlIndex;
               } else {
-                  newGate.qubit = controlIndex; // Target is the other line
-                  newGate.controlQubit = qubitIndex; // Control is the dropped line
+                  newGate.qubit = controlIndex;
+                  newGate.controlQubit = qubitIndex;
               }
           }
           newItem = newGate;
       } else {
-          // It's a custom gate
           newItem = {
               instanceId: `${componentId}-${Date.now()}`,
               customGateId: componentId,
@@ -591,7 +712,6 @@ export const App: React.FC = () => {
 
   // --- Asynchronous Hardware Job Submission ---
   const handleRunOnHardware = useCallback(async (apiKey: string, backendName: string) => {
-    // FIX: Refactored the condition to be more explicit and avoid potential linter errors.
     if (jobStatus === 'submitted' || jobStatus === 'queued' || jobStatus === 'running') return;
     
     setJobStatus('submitted');
@@ -602,29 +722,9 @@ export const App: React.FC = () => {
     try {
         const rawCode = generateQiskitCode(placedItems, customGateDefinitions, numQubits, { highlight: false });
         
-        // In a real application, you would uncomment the following block to call your backend.
-        /*
-        const response = await fetch('/api/submit-job', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                qiskitCode: rawCode,
-                apiToken: apiKey,
-                backendName: backendName,
-            }),
-        });
-
-        if (!response.ok) {
-            throw new Error(`Server error: ${response.statusText}`);
-        }
-        const { jobId: newJobId } = await response.json();
-        */
-
-        // --- SIMULATION FOR DEMO ---
-        // Since the backend is not implemented, we'll simulate a successful submission.
+        // Simulate backend delay
         await new Promise(resolve => setTimeout(resolve, 1500));
         const newJobId = `mqs-job-${Date.now()}`;
-        // --- END SIMULATION ---
 
         setJobId(newJobId);
         setJobStatus('queued'); // This kicks off the polling useEffect
@@ -647,16 +747,7 @@ export const App: React.FC = () => {
     
     const fetchJobResult = async (id: string) => {
       try {
-        // In a real application, you would uncomment the following block.
-        /*
-        const response = await fetch(`/api/job-result/${id}`);
-        if (!response.ok) throw new Error('Network response was not ok');
-        const data = await response.json();
-        const result = countsToSimulationResult(data.counts, numQubits);
-        */
-        
-        // --- SIMULATION FOR DEMO ---
-        // Since the backend is not implemented, we'll simulate a noisy result.
+        // Simulate noisy result
         const hardwareNoiseModel = { depolarizing: 0.01, phaseDamping: 0.02 };
         const simResult = simulate(placedItems, numQubits, customGateDefinitions, hardwareNoiseModel);
         const shots = 1024;
@@ -666,7 +757,6 @@ export const App: React.FC = () => {
             return acc;
         }, {} as {[key: string]: number});
         const result = countsToSimulationResult(counts, numQubits);
-        // --- END SIMULATION ---
         
         setHardwareResult(result);
       } catch (error) {
@@ -675,8 +765,6 @@ export const App: React.FC = () => {
       }
     };
 
-    // FIX: This condition was potentially causing a TypeScript/linter error due to how type narrowing
-    // was being inferred. Refactoring to a separate boolean variable clarifies the intent.
     const isTerminalStatus = jobStatus === 'idle' || jobStatus === 'completed' || jobStatus === 'error';
     if (!jobId || isTerminalStatus) {
       clearPolling();
@@ -686,24 +774,6 @@ export const App: React.FC = () => {
     if (!pollingIntervalRef.current) {
       pollingIntervalRef.current = window.setInterval(async () => {
         try {
-            // In a real application, you would uncomment this block to poll your backend.
-            /*
-            const response = await fetch(`/api/job-status/${jobId}`);
-            if (!response.ok) throw new Error('Status check failed');
-            const { status } = await response.json();
-            const serverStatus = status as JobStatus;
-            setJobStatus(serverStatus);
-
-            if (serverStatus === 'completed' || serverStatus === 'error') {
-              clearPolling();
-              if (serverStatus === 'completed') {
-                await fetchJobResult(jobId);
-              }
-            }
-            */
-            
-            // --- SIMULATION FOR DEMO ---
-            // This simulates the backend returning a new status on each poll.
             setJobStatus(currentStatus => {
                 let nextStatus: JobStatus = currentStatus;
                 if (currentStatus === 'queued') {
@@ -712,7 +782,6 @@ export const App: React.FC = () => {
                     nextStatus = 'completed';
                 }
 
-                // Logic to fetch results must be tied to the status change.
                 if (nextStatus === 'completed') {
                     fetchJobResult(jobId);
                     clearPolling();
@@ -722,7 +791,6 @@ export const App: React.FC = () => {
 
                 return nextStatus;
             });
-            // --- END SIMULATION ---
         } catch (error) {
             console.error('Error polling job status:', error);
             setJobStatus('error');
@@ -738,7 +806,7 @@ export const App: React.FC = () => {
   const isHardwareRunning = jobStatus === 'submitted' || jobStatus === 'queued' || jobStatus === 'running';
 
   return (
-    <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => setSelectedItemIds([])}>
+    <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => { setSelectedItemIds([]); setCursorPosition(null); }}>
       <div className="absolute inset-0 z-0 opacity-20">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(120,81,250,0.2),_transparent_40%)]"></div>
         <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre-v2.png')] opacity-20"></div>
@@ -766,7 +834,7 @@ export const App: React.FC = () => {
             draggingComponentId={draggingComponent?.component.id} 
             customGates={customGateDefinitions}
           />
-          <div className="flex-grow flex flex-col gap-4">
+          <div className="flex-grow flex flex-col gap-4 relative">
             <CircuitCanvas 
               ref={canvasRef}
               numQubits={numQubits}
@@ -787,6 +855,10 @@ export const App: React.FC = () => {
               simulationStep={simulationStep}
               setSimulationStep={setSimulationStep}
               onUpdateItem={handleUpdateItem}
+              cursorPosition={cursorPosition}
+              isQuickAddOpen={isQuickAddOpen}
+              onCloseQuickAdd={() => setIsQuickAddOpen(false)}
+              onQuickAddSelect={handleQuickAddSelect}
             />
           </div>
           <RightPanel 

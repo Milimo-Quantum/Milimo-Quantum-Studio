@@ -1,3 +1,4 @@
+
 import React, { forwardRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { PlacedItem, PlacedGate, CustomGateDefinition } from '../types';
@@ -13,6 +14,7 @@ import DebuggerAgentIcon from './icons/DebuggerAgentIcon';
 import OptimizerAgentIcon from './icons/OptimizerAgentIcon';
 import PlayIcon from './icons/PlayIcon';
 import GroupIcon from './icons/GroupIcon';
+import QuickAddMenu from './QuickAddMenu';
 
 interface CircuitCanvasProps {
   numQubits: number;
@@ -33,13 +35,40 @@ interface CircuitCanvasProps {
   simulationStep: number | null;
   setSimulationStep: (step: number | null) => void;
   onUpdateItem?: (instanceId: string, updates: Partial<PlacedGate>) => void;
+  cursorPosition: { qubit: number, gridIndex: number } | null;
+  isQuickAddOpen: boolean;
+  onCloseQuickAdd: () => void;
+  onQuickAddSelect: (gateId: string) => void;
 }
 
 const QUBIT_LINE_HEIGHT = 64; // h-16
 const GATE_WIDTH = 40; // w-10
 const GATE_HEIGHT = 40; // h-10
 
-const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedItems, customGateDefs, isDragging, onAnalyzeCircuit, onDebugCircuit, onOptimizeCircuit, onClear, onExplainGate, onGroupSelection, selectedItemIds, onSelectItem, visualizedQubit, setVisualizedQubit, simulationStep, setSimulationStep, onUpdateItem }, ref) => {
+const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ 
+    numQubits, 
+    onNumQubitsChange, 
+    placedItems, 
+    customGateDefs, 
+    isDragging, 
+    onAnalyzeCircuit, 
+    onDebugCircuit, 
+    onOptimizeCircuit, 
+    onClear, 
+    onExplainGate, 
+    onGroupSelection, 
+    selectedItemIds, 
+    onSelectItem, 
+    visualizedQubit, 
+    setVisualizedQubit, 
+    simulationStep, 
+    setSimulationStep, 
+    onUpdateItem,
+    cursorPosition,
+    isQuickAddOpen,
+    onCloseQuickAdd,
+    onQuickAddSelect
+}, ref) => {
   
   const handleItemClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
@@ -118,6 +147,37 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
             )}
             </div>
         ))}
+        
+        {/* Keyboard Navigation Cursor */}
+        <AnimatePresence>
+            {cursorPosition && (
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    className="absolute z-20 pointer-events-none border-2 border-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.5)] rounded-lg"
+                    style={{
+                        top: cursorPosition.qubit * QUBIT_LINE_HEIGHT + 12, // Centered roughly on line
+                        left: `${cursorPosition.gridIndex * 10}%`,
+                        width: '10%',
+                        height: '40px',
+                    }}
+                />
+            )}
+        </AnimatePresence>
+        
+        {/* Quick Add Menu */}
+        {isQuickAddOpen && cursorPosition && (
+            <QuickAddMenu
+                isOpen={isQuickAddOpen}
+                position={{ 
+                    top: cursorPosition.qubit * QUBIT_LINE_HEIGHT + 40,
+                    left: `${cursorPosition.gridIndex * 10}%` 
+                }}
+                onClose={onCloseQuickAdd}
+                onSelectGate={onQuickAddSelect}
+            />
+        )}
 
         {/* Simulation Step Indicator */}
         <AnimatePresence>
@@ -425,9 +485,8 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
       </div>
 
        <div className="absolute bottom-4 left-4 text-xs text-gray-600 font-['IBM_Plex_Mono']">
-         Click a gate to select, then press{' '}
-         <kbd className="px-1.5 py-0.5 border border-gray-700 rounded-md bg-gray-800">Delete</kbd> to remove.
-         Hold <kbd className="px-1.5 py-0.5 border border-gray-700 rounded-md bg-gray-800">Shift</kbd> to select multiple.
+         <span className="text-cyan-500 font-semibold">New:</span> Use <kbd className="px-1.5 py-0.5 border border-gray-700 rounded-md bg-gray-800">Arrow Keys</kbd> to navigate.
+         Press <kbd className="px-1.5 py-0.5 border border-gray-700 rounded-md bg-gray-800">Enter</kbd> to Quick Add.
       </div>
 
       <AnimatePresence>
