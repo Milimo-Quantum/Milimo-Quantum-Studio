@@ -101,13 +101,89 @@ const I = [[new Complex(1), new Complex(0)], [new Complex(0), new Complex(1)]];
 const X = [[new Complex(0), new Complex(1)], [new Complex(1), new Complex(0)]];
 const Y = [[new Complex(0), new Complex(0, -1)], [new Complex(0, 1), new Complex(0)]];
 const Z = [[new Complex(1), new Complex(0)], [new Complex(0), new Complex(-1)]];
-const GATES: { [key: string]: Matrix } = {
+
+// Helper to parse angles like "pi/2", "2*pi", "0.5"
+const parseAngle = (angleStr: string | undefined): number => {
+    if (!angleStr) return 0;
+    try {
+        // Very basic safe parsing.
+        let clean = angleStr.toLowerCase().replace(/\s/g, '');
+        if (clean === 'pi') return Math.PI;
+        if (clean === '-pi') return -Math.PI;
+        
+        // Handle fractions with pi, e.g., "pi/2", "3*pi/4", "-pi/2"
+        if (clean.includes('pi')) {
+             const parts = clean.split('pi');
+             let multiplier = 1;
+             let divisor = 1;
+             
+             let left = parts[0];
+             let right = parts[1];
+
+             if (left === '' || left === '+') multiplier = 1;
+             else if (left === '-') multiplier = -1;
+             else if (left.endsWith('*')) multiplier = parseFloat(left.slice(0, -1));
+             else multiplier = parseFloat(left);
+
+             if (right.startsWith('/')) {
+                 divisor = parseFloat(right.slice(1));
+             } else if (right.startsWith('*')) {
+                 // Handle cases like pi*0.5
+                 multiplier *= parseFloat(right.slice(1));
+             }
+
+             if (isNaN(multiplier)) multiplier = 1;
+             if (isNaN(divisor) || divisor === 0) divisor = 1;
+             
+             return (multiplier * Math.PI) / divisor;
+        }
+
+        const val = parseFloat(clean);
+        return isNaN(val) ? 0 : val;
+    } catch {
+        return 0;
+    }
+};
+
+type MatrixGenerator = (params?: { [key: string]: string }) => Matrix;
+
+const GATES: { [key: string]: Matrix | MatrixGenerator } = {
   h: [[new Complex(1 / Math.sqrt(2)), new Complex(1 / Math.sqrt(2))],[new Complex(1 / Math.sqrt(2)), new Complex(-1 / Math.sqrt(2))]],
   x: X, y: Y, z: Z,
   s: [[new Complex(1), new Complex(0)], [new Complex(0), new Complex(0, 1)]],
   sdg: [[new Complex(1), new Complex(0)], [new Complex(0), new Complex(0, -1)]],
   t: [[new Complex(1), new Complex(0)], [new Complex(0), new Complex(Math.cos(Math.PI / 4), Math.sin(Math.PI / 4))]],
   tdg: [[new Complex(1), new Complex(0)], [new Complex(0), new Complex(Math.cos(-Math.PI / 4), Math.sin(-Math.PI / 4))]],
+  // Parametric Gates
+  rx: (params) => {
+      const theta = parseAngle(params?.theta);
+      const cos = Math.cos(theta / 2);
+      const sin = Math.sin(theta / 2);
+      return [
+          [new Complex(cos, 0), new Complex(0, -sin)],
+          [new Complex(0, -sin), new Complex(cos, 0)]
+      ];
+  },
+  ry: (params) => {
+      const theta = parseAngle(params?.theta);
+      const cos = Math.cos(theta / 2);
+      const sin = Math.sin(theta / 2);
+      return [
+          [new Complex(cos, 0), new Complex(-sin, 0)],
+          [new Complex(sin, 0), new Complex(cos, 0)]
+      ];
+  },
+  rz: (params) => {
+      const theta = parseAngle(params?.theta);
+      const cos = Math.cos(theta / 2);
+      const sin = Math.sin(theta / 2);
+      // Rz = exp(-i*theta/2 * Z) = [[e^(-i*theta/2), 0], [0, e^(i*theta/2)]]
+      // e^(-ix) = cos(x) - i*sin(x)
+      return [
+          [new Complex(cos, -sin), new Complex(0, 0)],
+          [new Complex(0, 0), new Complex(cos, sin)]
+      ];
+  }
 };
 
 const isValidQubit = (qubit: number | undefined, numQubits: number) => {
@@ -186,10 +262,18 @@ export const simulate = (
     let U: Matrix = [[]]; // Full unitary for the gate
     
     // Construct the gate's unitary matrix U
-    if (gate.gateId in GATES) {
+    const gateDef = GATES[gate.gateId];
+    if (gateDef) {
+        let matrix: Matrix;
+        if (typeof gateDef === 'function') {
+            matrix = gateDef(gate.params);
+        } else {
+            matrix = gateDef;
+        }
+
         let op = [[new Complex(1)]];
         for (let i = 0; i < numQubits; i++) {
-            op = tensor(op, i === gate.qubit ? GATES[gate.gateId] : I);
+            op = tensor(op, i === gate.qubit ? matrix : I);
         }
         U = op;
     } else if (gate.gateId === 'cnot' && gate.controlQubit !== undefined) {

@@ -8,6 +8,7 @@ export interface QuantumGate {
   color: string;
   description: string;
   type?: 'single' | 'control';
+  params?: string[]; // List of parameter names (e.g., ['theta'])
 }
 
 export interface PlacedGate {
@@ -17,6 +18,7 @@ export interface PlacedGate {
   controlQubit?: number; // Control qubit for multi-qubit gates
   left: number; // Percentage position from left
   isSelected?: boolean;
+  params?: { [key: string]: string }; // Key-value pairs for params (e.g., { theta: 'pi/2' })
 }
 
 export interface CustomGateDefinition {

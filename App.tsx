@@ -245,6 +245,15 @@ export const App: React.FC = () => {
       }
     }
   }, [visualizedQubit, setState, state]);
+  
+  const handleUpdateItem = useCallback((instanceId: string, updates: Partial<PlacedGate>) => {
+      setState({
+          ...state,
+          placedItems: state.placedItems.map(item => 
+              item.instanceId === instanceId ? { ...item, ...updates } : item
+          )
+      });
+  }, [state, setState]);
 
 
   const executeActions = useCallback((actions: AIAction[]) => {
@@ -443,6 +452,7 @@ export const App: React.FC = () => {
               gateId: componentId,
               qubit: qubitIndex,
               left: leftPercent,
+              params: gateInfo.params ? Object.fromEntries(gateInfo.params.map(p => [p, 'pi'])) : undefined // Default params
           };
 
           if (gateInfo?.type === 'control') {
@@ -776,6 +786,7 @@ export const App: React.FC = () => {
               setVisualizedQubit={setVisualizedQubit}
               simulationStep={simulationStep}
               setSimulationStep={setSimulationStep}
+              onUpdateItem={handleUpdateItem}
             />
           </div>
           <RightPanel 

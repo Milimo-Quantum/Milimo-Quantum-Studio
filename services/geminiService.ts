@@ -12,8 +12,45 @@ const model = 'gemini-2.5-pro';
 
 // --- Tool Declarations ---
 const gateIds = Array.from(gateMap.keys());
-const addGateTool: FunctionDeclaration = { name: 'add_gate', parameters: { type: Type.OBJECT, properties: { gateId: { type: Type.STRING, enum: gateIds }, qubit: { type: Type.INTEGER }, controlQubit: { type: Type.INTEGER }, left: { type: Type.NUMBER } }, required: ['gateId', 'qubit', 'left'] } };
-const replaceCircuitTool: FunctionDeclaration = { name: 'replace_circuit', parameters: { type: Type.OBJECT, properties: { gates: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { gateId: { type: Type.STRING, enum: gateIds }, qubit: { type: Type.INTEGER }, controlQubit: { type: Type.INTEGER }, left: { type: Type.NUMBER } }, required: ['gateId', 'qubit', 'left'] } } }, required: ['gates'] } };
+const addGateTool: FunctionDeclaration = { 
+    name: 'add_gate', 
+    parameters: { 
+        type: Type.OBJECT, 
+        properties: { 
+            gateId: { type: Type.STRING, enum: gateIds }, 
+            qubit: { type: Type.INTEGER }, 
+            controlQubit: { type: Type.INTEGER }, 
+            left: { type: Type.NUMBER },
+            params: { type: Type.OBJECT, properties: { theta: { type: Type.STRING } }, description: "Parameters for the gate (e.g. {theta: 'pi/2'} for RX/RY/RZ)" }
+        }, 
+        required: ['gateId', 'qubit', 'left'] 
+    } 
+};
+
+const replaceCircuitTool: FunctionDeclaration = { 
+    name: 'replace_circuit', 
+    parameters: { 
+        type: Type.OBJECT, 
+        properties: { 
+            gates: { 
+                type: Type.ARRAY, 
+                items: { 
+                    type: Type.OBJECT, 
+                    properties: { 
+                        gateId: { type: Type.STRING, enum: gateIds }, 
+                        qubit: { type: Type.INTEGER }, 
+                        controlQubit: { type: Type.INTEGER }, 
+                        left: { type: Type.NUMBER },
+                        params: { type: Type.OBJECT, properties: { theta: { type: Type.STRING } } }
+                    }, 
+                    required: ['gateId', 'qubit', 'left'] 
+                } 
+            } 
+        }, 
+        required: ['gates'] 
+    } 
+};
+
 const getSimulationResultsTool: FunctionDeclaration = { name: 'get_simulation_results', parameters: { type: Type.OBJECT, properties: {} } };
 const setQubitCountTool: FunctionDeclaration = { 
   name: 'set_qubit_count', 
@@ -23,13 +60,17 @@ const setQubitCountTool: FunctionDeclaration = {
 const designTools = [addGateTool, replaceCircuitTool, getSimulationResultsTool, setQubitCountTool];
 
 // --- Agent System Instructions ---
-const staticGateLibrary = gates.map(g => `- **${g.name} (id: '${g.id}', type: ${g.type})**: ${g.description}`).join('\n');
+const staticGateLibrary = gates.map(g => {
+    const paramStr = g.params ? ` [Params: ${g.params.join(', ')}]` : '';
+    return `- **${g.name} (id: '${g.id}', type: ${g.type})${paramStr}**: ${g.description}`;
+}).join('\n');
 
 const sotaConceptsLibrary = `
 **SOTA Circuit Concepts Library:**
 - **5-Qubit Error Correcting Code:** The smallest perfect code that can protect against any single-qubit error (X, Y, or Z). A true SOTA example for error correction. Requires 5 qubits.
 - **Quantum Teleportation:** A protocol to transmit a quantum state from one location to another using a pre-shared Bell pair and classical communication. Requires 3 qubits.
 - **Deutsch-Jozsa Algorithm:** A simple but powerful demonstration of quantum parallelism, determining if a function is constant or balanced in a single evaluation. Requires N+1 qubits for an N-bit function.
+- **Variational Quantum Eigensolver (VQE) Ansatz:** Uses parameterized rotation gates (RX, RY, RZ) to prepare a trial wavefunction. Used for finding ground state energies.
 `;
 
 export const managerSystemInstruction = () => `You are the Manager of Milimo AI, a team of specialized quantum AI agents. Your job is to create a robust, multi-step plan to fulfill the user's request based on the provided context.
@@ -104,7 +145,10 @@ const criticSchema = {
 };
 
 const designAgentSystemInstruction = (numQubits: number, originalUserPrompt: string) => {
-    const dynamicGateLibrary = gates.map(g => `- **${g.name} (id: '${g.id}', type: ${g.type})**: ${g.description}`).join('\n');
+    const dynamicGateLibrary = gates.map(g => {
+         const paramStr = g.params ? ` [Params: ${g.params.join(', ')}]` : '';
+        return `- **${g.name} (id: '${g.id}', type: ${g.type})${paramStr}**: ${g.description}`;
+    }).join('\n');
     const definitiveGateIdList = JSON.stringify(gates.map(g => g.id));
 
     return `You are the Design Agent for Milimo AI, a master quantum circuit builder. Your purpose is to execute a PRE-APPROVED high-level plan, but you MUST ensure ALL constraints from the original user request are met.
@@ -118,6 +162,7 @@ The complete and exhaustive set of available gate IDs is: ${definitiveGateIdList
 **Circuit Constraints:**
 - The circuit has ${numQubits} qubits (0 to ${numQubits - 1}). This can be changed with the 'set_qubit_count' tool if necessary.
 - 'left' parameter (0-100) dictates gate order. Use sensible, spaced-out values.
+- **Parametric Gates:** For gates like 'rx', 'ry', 'rz', you MUST provide the 'params' object with a 'theta' value (e.g., { theta: 'pi/2' }).
 
 **Available Components & Tools:**
 ${dynamicGateLibrary}
@@ -175,7 +220,7 @@ ${circuitDescription}
 **Common Quantum Circuit Optimizations:**
 - **Gate Cancellation:** Two identical self-inverse gates in a row (e.g., H-H, X-X, CNOT-CNOT) on the same qubit(s) cancel each other out and can be removed.
 - **Identity Removal:** An identity gate (which does nothing) can be removed.
-- **Redundant Rotations:** Combining consecutive rotation gates (e.g., two Z-rotations) into a single rotation. (Note: The current gate set has fixed rotations, so focus on cancellations).
+- **Redundant Rotations:** Combining consecutive rotation gates (e.g., two Z-rotations) into a single rotation.
 
 **Your Task:**
 1.  **Analyze:** Carefully examine the provided circuit state for any of the optimization opportunities listed above, primarily focusing on gate cancellations.
@@ -194,7 +239,7 @@ const explanationAgentSystemInstruction = `You are the Explanation Agent for Mil
 3.  **Step 3: Hardware Comparison (Internal Monologue, if applicable):** If the input contains \`hardware_simulation_results\`, you MUST compare them to the \`ideal_simulation_results\`.
     - Note the differences in measurement probabilities (e.g., "The ideal result for state |11⟩ is 50%, but the hardware result is only 45.2%").
     - State that this difference is expected and is caused by quantum noise on the simulated hardware, which leads to errors and decoherence.
-4.  **Step 4: Synthesize Final Response (User-Facing Output):** Finally, combine your rigorous analysis with the user's intent and the critic's reasoning to generate the user-facing text.
+4.  **Step 4: Synthesize Final Response (User-Facing Output):** Finally, combine your rigorous analysis with the user's intent and the critic's decision-making process to generate the user-facing text.
     - Your description of the circuit on the canvas MUST be based *exclusively* on your analysis of the provided \`final_canvas_state\` object. DO NOT HALLUCINATE GATES that aren't there.
     - Explain WHAT was built on the canvas, being precise and accurate.
     - Explain WHY it was built, referencing the user's intent and the critic's decision-making process.
@@ -214,7 +259,7 @@ export const getAgentResponse = async (
 ): Promise<AIResponse> => {
     
     const circuitDescriptionForManager = currentCircuit.length > 0
-        ? JSON.stringify(currentCircuit.map(g => ({ gate: g.gateId, qubit: g.qubit, control: g.controlQubit, position: g.left })))
+        ? JSON.stringify(currentCircuit.map(g => ({ gate: g.gateId, qubit: g.qubit, control: g.controlQubit, position: g.left, params: g.params })))
         : 'The circuit is currently empty.';
     
     onStatusUpdate({ agent: 'Manager', status: 'running', message: 'Creating project plan...' });
@@ -287,7 +332,6 @@ ${userPromptText}
         });
 
         if (debuggerResponse.functionCalls && debuggerResponse.functionCalls.length > 0) {
-            // FIX: Used debuggerResponse instead of optimizerResponse
             const replaceCall = debuggerResponse.functionCalls.find(fc => fc.name === 'replace_circuit');
             if (replaceCall) {
                 executionContext.designActions.push({ type: 'replace_circuit', payload: (replaceCall.args as any).gates });
@@ -437,6 +481,7 @@ ${userPromptText}
             qubit: g.qubit,
             controlQubit: g.controlQubit,
             position: g.left,
+            params: g.params,
         })).sort((a,b) => a.position - b.position),
     };
 
@@ -509,7 +554,23 @@ export const getTutorResponse = async (
 
 
 // --- Code Generation ---
-const qiskitMethodMap: Record<string, (g: PlacedGate) => string | null> = { 'h': g => `qc.h(${g.qubit})`, 'x': g => `qc.x(${g.qubit})`, 'y': g => `qc.y(${g.qubit})`, 'z': g => `qc.z(${g.qubit})`, 's': g => `qc.s(${g.qubit})`, 'sdg': g => `qc.sdg(${g.qubit})`, 't': g => `qc.t(${g.qubit})`, 'tdg': g => `qc.tdg(${g.qubit})`, 'cnot': g => g.controlQubit !== undefined ? `qc.cx(${g.controlQubit}, ${g.qubit})` : null, 'cz': g => g.controlQubit !== undefined ? `qc.cz(${g.controlQubit}, ${g.qubit})` : null, 'swap': g => g.controlQubit !== undefined ? `qc.swap(${g.qubit}, ${g.controlQubit})` : null, 'measure': g => `qc.measure(${g.qubit}, ${g.qubit})`, };
+const qiskitMethodMap: Record<string, (g: PlacedGate) => string | null> = { 
+    'h': g => `qc.h(${g.qubit})`, 
+    'x': g => `qc.x(${g.qubit})`, 
+    'y': g => `qc.y(${g.qubit})`, 
+    'z': g => `qc.z(${g.qubit})`, 
+    'rx': g => `qc.rx(${g.params?.theta || 0}, ${g.qubit})`,
+    'ry': g => `qc.ry(${g.params?.theta || 0}, ${g.qubit})`,
+    'rz': g => `qc.rz(${g.params?.theta || 0}, ${g.qubit})`,
+    's': g => `qc.s(${g.qubit})`, 
+    'sdg': g => `qc.sdg(${g.qubit})`, 
+    't': g => `qc.t(${g.qubit})`, 
+    'tdg': g => `qc.tdg(${g.qubit})`, 
+    'cnot': g => g.controlQubit !== undefined ? `qc.cx(${g.controlQubit}, ${g.qubit})` : null, 
+    'cz': g => g.controlQubit !== undefined ? `qc.cz(${g.controlQubit}, ${g.qubit})` : null, 
+    'swap': g => g.controlQubit !== undefined ? `qc.swap(${g.qubit}, ${g.controlQubit})` : null, 
+    'measure': g => `qc.measure(${g.qubit}, ${g.qubit})`, 
+};
 const methodNames = Object.keys(qiskitMethodMap).join('|').replace('cnot', 'cx');
 
 const highlightCode = (code: string): string => {
@@ -537,6 +598,10 @@ export const generateQiskitCode = (
     const sortedGates = unrolledGates.sort((a, b) => a.left - b.left);
 
     let imports = `from qiskit import QuantumCircuit\n`;
+    if (sortedGates.some(g => ['pi'].some(p => g.params?.theta?.includes(p)))) {
+         imports += `from numpy import pi\n`;
+    }
+
     let code = `# Create a quantum circuit with ${numQubits} qubits and ${numQubits} classical bits\n`;
     code += `qc = QuantumCircuit(${numQubits}, ${numQubits})\n\n`;
 
@@ -567,7 +632,7 @@ export const generateQiskitCode = (
             code += `# Add depolarizing error to all single-qubit gates\n`;
             code += `p_depolarizing = ${noiseModel.depolarizing.toFixed(4)}\n`;
             code += `error_1 = depolarizing_error(p_depolarizing, 1)\n`;
-            code += `noise_model.add_all_qubit_quantum_error(error_1, ['h', 'x', 'y', 'z', 's', 'sdg', 't', 'tdg'])\n\n`;
+            code += `noise_model.add_all_qubit_quantum_error(error_1, ['h', 'x', 'y', 'z', 's', 'sdg', 't', 'tdg', 'rx', 'ry', 'rz'])\n\n`;
         }
         if (noiseModel.phaseDamping > 0) {
             code += `# Add phase damping error to all two-qubit gates\n`;

@@ -10,6 +10,9 @@ import TGateIcon from '../components/icons/TGateIcon';
 import TDaggerGateIcon from '../components/icons/TDaggerGateIcon';
 import MeasurementGateIcon from '../components/icons/MeasurementGateIcon';
 import SwapTargetIcon from '../components/icons/SwapTargetIcon';
+import RXGateIcon from '../components/icons/RXGateIcon';
+import RYGateIcon from '../components/icons/RYGateIcon';
+import RZGateIcon from '../components/icons/RZGateIcon';
 
 // For CNOT, CZ, and SWAP, the icon property is used for the draggable component in the left panel.
 // The actual rendering on the canvas is custom logic in CircuitCanvas.tsx.
@@ -20,6 +23,12 @@ export const gates: QuantumGate[] = [
   { id: 'x', name: 'Pauli-X', icon: PauliXGateIcon, color: 'text-red-400', description: 'Performs a bit-flip (NOT) on the qubit.', type: 'single' },
   { id: 'y', name: 'Pauli-Y', icon: PauliYGateIcon, color: 'text-red-400', description: 'Rotates the qubit by π around the Y-axis.', type: 'single' },
   { id: 'z', name: 'Pauli-Z', icon: PauliZGateIcon, color: 'text-red-400', description: 'Performs a phase-flip on the qubit.', type: 'single' },
+  
+  // Parametric Gates
+  { id: 'rx', name: 'RX Gate', icon: RXGateIcon, color: 'text-pink-400', description: 'Rotates the qubit by angle θ around the X-axis.', type: 'single', params: ['theta'] },
+  { id: 'ry', name: 'RY Gate', icon: RYGateIcon, color: 'text-pink-400', description: 'Rotates the qubit by angle θ around the Y-axis.', type: 'single', params: ['theta'] },
+  { id: 'rz', name: 'RZ Gate', icon: RZGateIcon, color: 'text-pink-400', description: 'Rotates the qubit by angle θ around the Z-axis.', type: 'single', params: ['theta'] },
+
   { id: 's', name: 'S Gate', icon: SGateIcon, color: 'text-purple-400', description: 'Phase gate, rotates by π/2 around Z-axis.', type: 'single' },
   { id: 'sdg', name: 'S† Gate', icon: SDaggerGateIcon, color: 'text-purple-400', description: 'Conjugate transpose of the S gate.', type: 'single' },
   { id: 't', name: 'T Gate', icon: TGateIcon, color: 'text-purple-400', description: 'Phase gate, rotates by π/4 around Z-axis.', type: 'single' },

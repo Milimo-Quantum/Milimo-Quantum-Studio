@@ -32,13 +32,14 @@ interface CircuitCanvasProps {
   setVisualizedQubit: (qubitIndex: number) => void;
   simulationStep: number | null;
   setSimulationStep: (step: number | null) => void;
+  onUpdateItem?: (instanceId: string, updates: Partial<PlacedGate>) => void;
 }
 
 const QUBIT_LINE_HEIGHT = 64; // h-16
 const GATE_WIDTH = 40; // w-10
 const GATE_HEIGHT = 40; // h-10
 
-const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedItems, customGateDefs, isDragging, onAnalyzeCircuit, onDebugCircuit, onOptimizeCircuit, onClear, onExplainGate, onGroupSelection, selectedItemIds, onSelectItem, visualizedQubit, setVisualizedQubit, simulationStep, setSimulationStep }, ref) => {
+const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubits, onNumQubitsChange, placedItems, customGateDefs, isDragging, onAnalyzeCircuit, onDebugCircuit, onOptimizeCircuit, onClear, onExplainGate, onGroupSelection, selectedItemIds, onSelectItem, visualizedQubit, setVisualizedQubit, simulationStep, setSimulationStep, onUpdateItem }, ref) => {
   
   const handleItemClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
@@ -63,6 +64,17 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
           if (nextStep >= 0 && nextStep <= sortedItems.length) {
               setSimulationStep(nextStep);
           }
+      }
+  };
+
+  const handleParamChange = (key: string, value: string) => {
+      if (selectedItem && 'gateId' in selectedItem && onUpdateItem) {
+          onUpdateItem(selectedItem.instanceId, {
+              params: {
+                  ...(selectedItem.params || {}),
+                  [key]: value
+              }
+          });
       }
   };
 
@@ -272,6 +284,12 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
                         />
                     )}
                   </div>
+                  {/* Param Label for Visualization */}
+                  {placedGate.params && placedGate.params.theta && (
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 text-[10px] font-mono text-gray-400 bg-black/50 px-1 rounded mt-1 whitespace-nowrap">
+                          {placedGate.params.theta}
+                      </div>
+                  )}
                 </motion.div>
               )
           } else if ('customGateId' in item) {
@@ -331,6 +349,25 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
       <div className="absolute top-2 right-4 flex items-center gap-2">
          <AnimatePresence>
           {selectedItem && 'gateId' in selectedItem && (
+            <>
+            {/* Parameter Input for Selected Gate */}
+            {selectedItem.params && (
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className="flex items-center gap-2 bg-gray-800 border border-gray-600 rounded-md px-2 py-1"
+                >
+                    <span className="text-xs font-mono text-pink-400">θ:</span>
+                    <input 
+                        type="text" 
+                        value={selectedItem.params.theta}
+                        onChange={(e) => handleParamChange('theta', e.target.value)}
+                        className="w-16 bg-transparent text-xs font-mono text-white focus:outline-none border-b border-gray-600 focus:border-pink-400 transition-colors"
+                    />
+                </motion.div>
+            )}
+
             <motion.button
               initial={{ opacity: 0, width: 0 }}
               animate={{ opacity: 1, width: 'auto' }}
@@ -341,6 +378,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ numQubit
               <ExplanationAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity flex-shrink-0" />
               <span className="flex-shrink-0">Explain Gate</span>
             </motion.button>
+            </>
           )}
           {canGroup && (
                <motion.button
