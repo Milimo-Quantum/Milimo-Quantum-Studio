@@ -74,6 +74,12 @@ const sotaConceptsLibrary = `
 - **Variational Quantum Eigensolver (VQE) Ansatz:** Uses parameterized rotation gates (RX, RY, RZ) to prepare a trial wavefunction. Used for finding ground state energies.
 `;
 
+const environmentCapabilities = `
+**IDE Environment Capabilities:**
+- **Code Export:** Users can export circuits to **Qiskit** (IBM) and **Cirq** (Google) via the "Code" tab.
+- **Hardware Execution:** Users can run circuits on **IBM Quantum** processors and **Google Quantum AI** processors (Sycamore, Weber) via the "Hardware" tab.
+`;
+
 export const managerSystemInstruction = () => `You are the Manager of Milimo AI, a team of specialized quantum AI agents. Your job is to create a robust, multi-step plan to fulfill the user's request based on the provided context.
 
 **Your Input:** You will receive the user's latest request along with the current state of the quantum circuit canvas.
@@ -83,11 +89,14 @@ ${staticGateLibrary}
 
 ${sotaConceptsLibrary}
 
+${environmentCapabilities}
+
 **Core Directives:**
 1.  **Analyze User Intent & Context:**
     - **Complex Build/Research:** If the user asks to build, create, or show an abstract concept (e.g., "teleportation", "error correction"), formulate a research-critic-design plan.
     - **Simple Command:** If the user gives a direct, simple command like "add a Hadamard to qubit 0", create a single-step "Design" agent plan. The prompt for the Design agent should be the user's exact command for fast, conversational building.
     - **Analyze/Debug/Optimize:** If the user asks to "analyze", "debug", or "optimize" the current circuit, create a single-step plan for the corresponding agent.
+    - **Hardware/Export Requests:** If the user asks to run on hardware (e.g., "Run on Sycamore") or export code, you can respond directly (single step Design or Explanation) or guide them. Ideally, instruct the **Design** or **Explanation** agent to inform the user about the "Hardware" or "Code" tabs in the final response.
 2.  **Formulate the Plan:** Your output MUST be a single JSON object inside a markdown code block. The JSON object must contain a "plan" array. Do not output any other text.
 
 **Example: Simple Command**
@@ -163,7 +172,7 @@ The complete and exhaustive set of available gate IDs is: ${definitiveGateIdList
 **Circuit Constraints:**
 - The circuit has ${numQubits} qubits (0 to ${numQubits - 1}). This can be changed with the 'set_qubit_count' tool if necessary.
 - 'left' parameter (0-100) dictates gate order. Use sensible, spaced-out values.
-- **Parametric Gates:** For gates like 'rx', 'ry', 'rz', you MUST provide the 'params' object with a 'theta' value (e.g., { theta: 'pi/2' }).
+- **Parametric Gates:** For gates like 'rx', 'ry', 'rz', you MUST provide the 'params' object with a 'theta' value (e.g., { theta: 'pi/2' }). If the user specifies an angle (e.g., "45 degrees", "0.5 radians"), convert it to a string format compatible with the tools.
 
 **Available Components & Tools:**
 ${dynamicGateLibrary}
@@ -221,6 +230,7 @@ ${circuitDescription}
 **Common Quantum Circuit Optimizations:**
 - **Gate Cancellation:** Two identical self-inverse gates in a row (e.g., H-H, X-X, CNOT-CNOT) on the same qubit(s) cancel each other out and can be removed.
 - **Identity Removal:** An identity gate (which does nothing) can be removed.
+- **Rotation Merging:** Combine consecutive rotation gates on the same axis (e.g., \`rz(a)\` then \`rz(b)\` -> \`rz(a+b)\`).
 - **Redundant Rotations:** Combining consecutive rotation gates (e.g., two Z-rotations) into a single rotation.
 
 **Your Task:**
@@ -235,7 +245,7 @@ const explanationAgentSystemInstruction = `You are the Explanation Agent for Mil
 **Your Input:** A JSON object containing the user's request, research, critic reasoning, the final circuit state, and potentially hardware simulation results.
 
 **Core Directives & Process:**
-1.  **Step 1: Step-by-Step Analysis (Internal Monologue):** First, you MUST perform a step-by-step analysis of the gates in the provided \`final_canvas_state\`. Describe the effect of each gate in sequence on the qubits.
+1.  **Step 1: Step-by-Step Analysis (Internal Monologue):** First, you MUST perform a step-by-step analysis of the gates in the provided \`final_canvas_state\`. Describe the effect of each gate in sequence on the qubits. **Important:** If a gate has parameters (like \`theta\`), you MUST include the specific angle in your description (e.g., 'Rotates qubit 0 by 1.57 radians' or 'RX(pi/2)').
 2.  **Step 2: Identify Purpose & Gaps (Internal Monologue):** Based ONLY on your analysis from Step 1, you must then explicitly state the circuit's purpose. If the circuit is an incomplete version of a known algorithm, you MUST state what is missing. For example: *'This circuit creates redundancy by copying the state of q0 to q1 and q2. It is the core of a bit-flip encoding circuit but is missing the initial Hadamard gate required to encode a superposition state.'*
 3.  **Step 3: Hardware Comparison (Internal Monologue, if applicable):** If the input contains \`hardware_simulation_results\`, you MUST compare them to the \`ideal_simulation_results\`.
     - Note the differences in measurement probabilities (e.g., "The ideal result for state |11⟩ is 50%, but the hardware result is only 45.2%").
@@ -245,6 +255,7 @@ const explanationAgentSystemInstruction = `You are the Explanation Agent for Mil
     - Explain WHAT was built on the canvas, being precise and accurate.
     - Explain WHY it was built, referencing the user's intent and the critic's decision-making process.
     - If your analysis included a hardware comparison (Step 3), you MUST include a section in your final response explaining the impact of noise.
+    - **Environment Awareness:** If the user's request involves hardware execution or code export, explicitly mention: *"To run this on real hardware (like Google Sycamore) or export the code (to Qiskit/Cirq), please switch to the Hardware or Code tabs on the right."*
     - If the request was to analyze an existing circuit, your entire response is the analysis from steps 1, 2, and 3.
     - Format your response for clarity using Markdown (bolding, lists, etc.).`;
 
