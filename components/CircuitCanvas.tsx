@@ -1,5 +1,5 @@
 
-import React, { forwardRef, useMemo } from 'react';
+import React, { forwardRef, useMemo, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { PlacedItem, PlacedGate, CustomGateDefinition } from '../types';
 import { gateMap } from '../data/gates';
@@ -30,6 +30,7 @@ interface CircuitCanvasProps {
   onGroupSelection: () => void;
   selectedItemIds: string[];
   onSelectItem: (instanceId: string, isShiftPressed: boolean) => void;
+  onMultiSelect?: (instanceIds: string[]) => void;
   visualizedQubit: number;
   setVisualizedQubit: (qubitIndex: number) => void;
   simulationStep: number | null;
@@ -44,6 +45,7 @@ interface CircuitCanvasProps {
 const QUBIT_LINE_HEIGHT = 64; // h-16
 const GATE_WIDTH = 40; // w-10
 const GATE_HEIGHT = 40; // h-10
+const PADDING = 32;
 
 const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({ 
     numQubits, 
@@ -58,7 +60,8 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
     onExplainGate, 
     onGroupSelection, 
     selectedItemIds, 
-    onSelectItem, 
+    onSelectItem,
+    onMultiSelect, 
     visualizedQubit, 
     setVisualizedQubit, 
     simulationStep, 
@@ -70,6 +73,11 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
     onQuickAddSelect
 }, ref) => {
   
+  // Drag Selection State
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionStart, setSelectionStart] = useState<{x: number, y: number} | null>(null);
+  const [selectionRect, setSelectionRect] = useState<{x: number, y: number, w: number, h: number} | null>(null);
+
   const handleItemClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
     onSelectItem(instanceId, e.shiftKey);
@@ -107,6 +115,109 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
       }
   };
 
+  // --- Drag Selection Logic ---
+  const handleMouseDown = (e: React.MouseEvent) => {
+      // Only start selection if clicking on background
+      if ((e.target as HTMLElement).closest('.cursor-pointer')) return;
+      if (!ref || !('current' in ref) || !ref.current) return;
+
+      const rect = ref.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      setIsSelecting(true);
+      setSelectionStart({ x, y });
+      setSelectionRect({ x, y, w: 0, h: 0 });
+      
+      // Clear selection if not holding shift (standard behavior)
+      if (!e.shiftKey && onMultiSelect) {
+          onMultiSelect([]);
+      }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+      if (!isSelecting || !selectionStart || !ref || !('current' in ref) || !ref.current) return;
+
+      const rect = ref.current.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top;
+
+      const x = Math.min(selectionStart.x, currentX);
+      const y = Math.min(selectionStart.y, currentY);
+      const w = Math.abs(currentX - selectionStart.x);
+      const h = Math.abs(currentY - selectionStart.y);
+
+      setSelectionRect({ x, y, w, h });
+  };
+
+  const handleMouseUp = () => {
+      if (!isSelecting || !selectionRect || !onMultiSelect || !ref || !('current' in ref) || !ref.current) {
+          setIsSelecting(false);
+          setSelectionStart(null);
+          setSelectionRect(null);
+          return;
+      }
+
+      const canvasRect = ref.current.getBoundingClientRect();
+      const contentWidth = canvasRect.width - PADDING * 2;
+
+      const intersectedIds = placedItems.filter(item => {
+          // Calculate item position in pixels
+          const itemX = PADDING + (item.left / 100) * contentWidth;
+          const itemY = PADDING + item.qubit * QUBIT_LINE_HEIGHT + (QUBIT_LINE_HEIGHT / 2) - (GATE_HEIGHT / 2);
+          const itemW = GATE_WIDTH;
+          
+          // Calculate item height (dynamic for multi-qubit gates)
+          let itemH = GATE_HEIGHT;
+          let actualItemY = itemY;
+
+          if ('gateId' in item && item.controlQubit !== undefined) {
+             const controlY = PADDING + item.controlQubit * QUBIT_LINE_HEIGHT + (QUBIT_LINE_HEIGHT / 2) - (GATE_HEIGHT / 2);
+             actualItemY = Math.min(itemY, controlY);
+             itemH = Math.abs(itemY - controlY) + GATE_HEIGHT;
+          } else if ('customGateId' in item) {
+              const def = customGateDefs.find(d => d.id === item.customGateId);
+              if (def) {
+                   const maxRelativeQubit = Math.max(...def.gates.map(g => g.controlQubit ?? g.qubit), ...def.gates.map(g => g.qubit));
+                   itemH = (maxRelativeQubit + 1) * QUBIT_LINE_HEIGHT;
+                   actualItemY = PADDING + item.qubit * QUBIT_LINE_HEIGHT;
+                   // Custom gate width visual approximation
+                   // In render it is 80px wide, 40px left of center point
+                   // center point is itemX
+              }
+          }
+
+          // AABB Intersection Check
+          // Selection Box
+          const sLeft = selectionRect.x;
+          const sRight = selectionRect.x + selectionRect.w;
+          const sTop = selectionRect.y;
+          const sBottom = selectionRect.y + selectionRect.h;
+
+          // Item Box
+          // Centered item logic adjustment
+          const iLeft = itemX - (GATE_WIDTH / 2); // Items are centered on left%
+          const iRight = iLeft + itemW;
+          const iTop = actualItemY;
+          const iBottom = actualItemY + itemH;
+
+          return (
+              sLeft < iRight &&
+              sRight > iLeft &&
+              sTop < iBottom &&
+              sBottom > iTop
+          );
+      }).map(i => i.instanceId);
+
+      // Merge with existing if Shift held? For now, let's just set new selection.
+      // Could implement standard shift-add logic here if needed.
+      onMultiSelect(intersectedIds);
+
+      setIsSelecting(false);
+      setSelectionStart(null);
+      setSelectionRect(null);
+  };
+
 
   return (
     <motion.div
@@ -114,13 +225,17 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
       initial={{ scale: 0.95, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={{ duration: 0.5, delay: 0.3, ease: 'easeOut' }}
-      className={`flex-grow bg-black/30 backdrop-blur-sm rounded-xl border border-gray-500/20 p-8 relative overflow-auto transition-all duration-300 ${isDragging ? 'border-cyan-400/50 ring-2 ring-cyan-400/50' : ''}`}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp} // Stop selecting if leaving canvas
+      className={`flex-grow bg-black/30 backdrop-blur-sm rounded-xl border border-gray-500/20 p-8 relative overflow-hidden transition-all duration-300 ${isDragging ? 'border-cyan-400/50 ring-2 ring-cyan-400/50' : ''}`}
       style={{
         backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(100, 100, 100, 0.3) 1px, transparent 0)',
         backgroundSize: '20px 20px',
       }}
     >
-      <div className="absolute inset-0 bg-gradient-to-br from-transparent to-black/30"></div>
+      <div className="absolute inset-0 bg-gradient-to-br from-transparent to-black/30 pointer-events-none"></div>
       
       <div className="relative w-full h-full flex flex-col justify-start z-0">
         {/* Qubit Lines */}
@@ -138,7 +253,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
             {visualizedQubit === i && (
                 <motion.div
                 layoutId="qubit-selection"
-                className="absolute -inset-x-2 -inset-y-4 bg-cyan-500/10 rounded-lg"
+                className="absolute -inset-x-2 -inset-y-4 bg-cyan-500/10 rounded-lg pointer-events-none"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -195,6 +310,19 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                 />
             )}
         </AnimatePresence>
+        
+        {/* Drag Selection Rectangle */}
+        {selectionRect && (
+            <div
+                className="absolute bg-cyan-400/20 border border-cyan-400/50 z-50 pointer-events-none"
+                style={{
+                    left: selectionRect.x,
+                    top: selectionRect.y,
+                    width: selectionRect.w,
+                    height: selectionRect.h,
+                }}
+            />
+        )}
 
 
         {/* Placed Items */}
@@ -393,7 +521,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
         </AnimatePresence>
       </div>
       
-      <div className="absolute top-2 left-4 flex items-center gap-2">
+      <div className="absolute top-2 left-4 flex items-center gap-2 z-20">
          <div className="flex items-center gap-2 bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md">
             <span className="text-xs font-mono">Qubits:</span>
             <button onClick={() => onNumQubitsChange(numQubits - 1)} disabled={numQubits <= 2} className="disabled:opacity-30 enabled:hover:text-white transition-colors">
@@ -406,7 +534,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
         </div>
       </div>
       
-      <div className="absolute top-2 right-4 flex items-center gap-2">
+      <div className="absolute top-2 right-4 flex items-center gap-2 z-20">
          <AnimatePresence>
           {selectedItem && 'gateId' in selectedItem && (
             <>
@@ -484,9 +612,8 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
         </button>
       </div>
 
-       <div className="absolute bottom-4 left-4 text-xs text-gray-600 font-['IBM_Plex_Mono']">
-         <span className="text-cyan-500 font-semibold">New:</span> Use <kbd className="px-1.5 py-0.5 border border-gray-700 rounded-md bg-gray-800">Arrow Keys</kbd> to navigate.
-         Press <kbd className="px-1.5 py-0.5 border border-gray-700 rounded-md bg-gray-800">Enter</kbd> to Quick Add.
+       <div className="absolute bottom-4 left-4 text-xs text-gray-600 font-['IBM_Plex_Mono'] z-10 pointer-events-none">
+         <span className="text-cyan-500 font-semibold">Tips:</span> Use <kbd className="px-1.5 py-0.5 border border-gray-700 rounded-md bg-gray-800">Arrow Keys</kbd> to navigate. Drag to Select.
       </div>
 
       <AnimatePresence>

@@ -12,6 +12,7 @@ import { simulate } from './services/quantumSimulator';
 import { gateMap } from './data/gates';
 import { useHistory } from './hooks/useHistory';
 import TutorNotification from './components/TutorNotification';
+import ProjectModal from './components/ProjectModal';
 import { Chat, GoogleGenAI } from '@google/genai';
 
 const INITIAL_STATE: CircuitState = {
@@ -110,6 +111,10 @@ export const App: React.FC = () => {
   const [jobStatus, setJobStatus] = useState<JobStatus>('idle');
   const [runningBackend, setRunningBackend] = useState<Backend | null>(null);
   const pollingIntervalRef = useRef<number | null>(null);
+  
+  // --- Project Manager State ---
+  const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
+  const [projectModalMode, setProjectModalMode] = useState<'save' | 'load'>('save');
 
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -129,7 +134,6 @@ export const App: React.FC = () => {
             setAiChatSession(chatSession);
         } catch (error) {
             console.error("Failed to initialize AI chat session:", error);
-            // You might want to display an error message to the user here.
         }
     };
     initializeChat();
@@ -223,11 +227,17 @@ export const App: React.FC = () => {
       return prevIds.includes(instanceId) && prevIds.length === 1 ? [] : [instanceId];
     });
   };
+
+  const handleMultiSelect = (instanceIds: string[]) => {
+       setSelectedItemIds(instanceIds);
+  };
   
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       // If Quick Add is open, let it handle keys (except Escape which is handled here too potentially, but usually component handles it)
       if (isQuickAddOpen) return;
+      // If Project Modal is open, ignore global keys except Esc handled by modal usually
+      if (isProjectModalOpen) return;
 
       // Deletion
       if ((event.key === 'Backspace' || event.key === 'Delete') && selectedItemIds.length > 0) {
@@ -322,7 +332,7 @@ export const App: React.FC = () => {
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedItemIds, state, setState, undo, redo, isQuickAddOpen, cursorPosition, numQubits]);
+  }, [selectedItemIds, state, setState, undo, redo, isQuickAddOpen, cursorPosition, numQubits, isProjectModalOpen]);
 
   const handleQuickAddSelect = (gateId: string) => {
       if (!cursorPosition) return;
@@ -365,13 +375,27 @@ export const App: React.FC = () => {
 
   const handleNumQubitsChange = useCallback((newNumQubits: number) => {
     if (newNumQubits >= 2 && newNumQubits <= 5) {
+        // Smart Resize: Filter items that are now out of bounds
+        const validItems = state.placedItems.filter(item => {
+            if ('gateId' in item) {
+                const targetValid = item.qubit < newNumQubits;
+                const controlValid = item.controlQubit === undefined || item.controlQubit < newNumQubits;
+                return targetValid && controlValid;
+            } else if ('customGateId' in item) {
+                const def = state.customGateDefinitions.find(d => d.id === item.customGateId);
+                if (!def) return false;
+                const maxRel = Math.max(...def.gates.map(g => Math.max(g.qubit, g.controlQubit ?? 0)));
+                return (item.qubit + maxRel) < newNumQubits;
+            }
+            return false;
+        });
+
       setState({
         ...state,
         numQubits: newNumQubits,
-        placedItems: [] // Clear circuit on qubit change
+        placedItems: validItems
       });
-      setSelectedItemIds([]);
-      setCursorPosition(null); // Clear cursor
+      
       if (visualizedQubit >= newNumQubits) {
         setVisualizedQubit(0);
       }
@@ -539,11 +563,13 @@ export const App: React.FC = () => {
   }, [handleSend]);
 
   const handleClearCircuit = useCallback(() => {
-    setState({ ...state, placedItems: [] });
-    setSelectedItemIds([]);
-    setSimulationStep(null);
-    setCursorPosition(null);
-  }, [state, setState]);
+    if (placedItems.length > 0 && window.confirm("Are you sure you want to clear the circuit? This action cannot be undone easily.")) {
+        setState({ ...state, placedItems: [] });
+        setSelectedItemIds([]);
+        setSimulationStep(null);
+        setCursorPosition(null);
+    }
+  }, [state, setState, placedItems]);
 
   const handleShowVisualization = useCallback(() => {
     setActiveTab('visualization');
@@ -558,7 +584,7 @@ export const App: React.FC = () => {
 
   const handleComponentDrop = (componentId: string, point: { x: number; y: number }) => {
     if (!canvasRef.current) return;
-    setSelectedItemIds([]);
+    // setSelectedItemIds([]); // Don't clear selection on drop for smoother flow if multi-select
     setCursorPosition(null);
 
     const canvasRect = canvasRef.current.getBoundingClientRect();
@@ -644,22 +670,17 @@ export const App: React.FC = () => {
   };
   
   const handleSave = useCallback(() => {
-    localStorage.setItem('milimo_quantum_circuit', JSON.stringify(state));
-  }, [state]);
+    setProjectModalMode('save');
+    setIsProjectModalOpen(true);
+  }, []);
 
   const handleLoad = useCallback(() => {
-    const savedState = localStorage.getItem('milimo_quantum_circuit');
-    if (savedState) {
-        try {
-            const parsedState = JSON.parse(savedState);
-            // Basic validation
-            if (typeof parsedState.numQubits === 'number' && Array.isArray(parsedState.placedItems)) {
-                setState(parsedState, true); // true to overwrite history
-            }
-        } catch (e) {
-            console.error("Failed to load circuit from storage", e);
-        }
-    }
+    setProjectModalMode('load');
+    setIsProjectModalOpen(true);
+  }, []);
+  
+  const handleProjectLoaded = useCallback((loadedState: CircuitState) => {
+      setState(loadedState, true);
   }, [setState]);
 
   const handleShare = useCallback(() => {
@@ -852,7 +873,7 @@ export const App: React.FC = () => {
   const isHardwareRunning = jobStatus === 'submitted' || jobStatus === 'queued' || jobStatus === 'running';
 
   return (
-    <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => { setSelectedItemIds([]); setCursorPosition(null); }}>
+    <div className="bg-[#0a0a10] text-gray-200 min-h-screen flex flex-col font-sans relative" onClick={() => { /* Let CircuitCanvas handle clicks to clear selection */ }}>
       <div className="absolute inset-0 z-0 opacity-20">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(120,81,250,0.2),_transparent_40%)]"></div>
         <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre-v2.png')] opacity-20"></div>
@@ -896,6 +917,7 @@ export const App: React.FC = () => {
               onGroupSelection={handleGroupSelection}
               selectedItemIds={selectedItemIds}
               onSelectItem={handleSelectItem}
+              onMultiSelect={handleMultiSelect}
               visualizedQubit={visualizedQubit}
               setVisualizedQubit={setVisualizedQubit}
               simulationStep={simulationStep}
@@ -951,6 +973,18 @@ export const App: React.FC = () => {
         isLoading={isTutorLoading}
         onDismiss={() => setTutorResponse(null)}
       />
+
+      <AnimatePresence>
+          {isProjectModalOpen && (
+              <ProjectModal 
+                  isOpen={isProjectModalOpen}
+                  mode={projectModalMode}
+                  currentState={state}
+                  onClose={() => setIsProjectModalOpen(false)}
+                  onLoadProject={handleProjectLoaded}
+              />
+          )}
+      </AnimatePresence>
     </div>
   );
 };
