@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, FunctionDeclaration, Type, Content, Part, Chat } from "@google/genai";
-import type { AIResponse, AgentStatusUpdate, PlacedGate, AIAction, Message, SimulationResult, Source, AddGatePayload, PlacedItem, CustomGateDefinition } from "../types";
+import type { AIResponse, AgentStatusUpdate, PlacedGate, AIAction, Message, SimulationResult, Source, AddGatePayload, PlacedItem, CustomGateDefinition, TutorResponse } from "../types";
 import { gateMap, gates } from "../data/gates";
 import { unrollCircuit } from "./quantumSimulator";
 
@@ -533,35 +533,64 @@ ${userPromptText}
 };
 
 // --- Tutor Mode ---
-export const tutorSystemInstruction = `You are an AI Quantum Tutor for Milimo Quantum Studio. Your role is to provide proactive, Socratic, and educational guidance as a user builds a quantum circuit.
+export const tutorSystemInstruction = `You are an AI Quantum Tutor for Milimo Quantum Studio. Your role is to provide proactive, Socratic, and physics-aware guidance as a user builds a quantum circuit.
 
 **Core Directives:**
 1.  **Be Socratic:** DO NOT give direct answers. Instead, ask guiding questions to stimulate the user's thinking.
 2.  **Be Concise:** Your responses must be short and to the point, ideally one or two sentences.
-3.  **Be Contextual:** Base your guidance on the *last action* or the *current state* of the circuit provided.
-4.  **Be Encouraging:** Maintain a positive and helpful tone.
+3.  **Be Physics-Aware:** Use the provided 'physicsContext' (purity, superposition) to inform your tips.
+    - **Entanglement:** If a qubit's purity is < 1.0, it implies entanglement with another qubit. Use this fact to confirm success (e.g., "You've successfully entangled these qubits!").
+    - **Superposition:** If the vector is not on the Z-axis, mention the change in probability amplitudes.
+    - **Parameters:** If rotation gates are used, mention how the 'theta' parameter continuously shifts the state, unlike discrete gates.
+4.  **Suggest Hardware:** If the circuit creates a high-quality standard state (like Bell or GHZ) with high purity, explicitly suggest running it on real hardware.
+5.  **Categorize:** Your output must be a JSON object with a 'type' field to categorize the tip.
+
+**Output Schema:**
+You MUST return a valid JSON object:
+\`\`\`json
+{
+  "type": "syntax" | "physics" | "hardware",
+  "message": "Your concise, socratic tip here."
+}
+\`\`\`
 
 **Examples:**
-- If user adds a Hadamard: "Great! You've put a qubit into superposition. What do you think will happen if you measure it now?"
-- If user creates a Bell State: "You've just created an entangled Bell state! Notice how the individual qubit states are no longer independent. What could this be useful for?"
-- If user adds a second Hadamard to the same qubit: "Interesting, a second Hadamard gate. What does applying the same gate twice in a row often do?"
-- If the circuit is empty or just one gate: "Keep going! What's the next step you have in mind for your algorithm?"
-
-Analyze the provided circuit and give a brief, Socratic tip.`;
+- **Syntax:** { "type": "syntax", "message": "A CNOT gate requires a control and a target. What happens if you add a control qubit?" }
+- **Physics:** { "type": "physics", "message": "Interesting! The purity of q[0] has dropped to 0.5, indicating maximal entanglement. Which qubit is it entangled with?" }
+- **Physics (Parametric):** { "type": "physics", "message": "You're rotating by PI/2. How does this differ from a standard Hadamard gate on the Bloch sphere?" }
+- **Hardware:** { "type": "hardware", "message": "This Bell state is a perfect candidate to run on the Google Sycamore processor in the Hardware tab." }
+`;
 
 export const getTutorResponse = async (
   circuitDescription: string,
-  numQubits: number
-): Promise<string> => {
-  const prompt = `The user is building a ${numQubits}-qubit circuit. Its current state is: ${circuitDescription}. Provide a Socratic tip based on this.`;
-  
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash', // Use a faster model for tutoring
-    contents: prompt,
-    config: { systemInstruction: tutorSystemInstruction }
-  });
+  numQubits: number,
+  physicsContext: string
+): Promise<TutorResponse> => {
+  const prompt = `
+**Circuit Context:**
+- Qubits: ${numQubits}
+- Circuit Gates: ${circuitDescription}
 
-  return response.text;
+**Physics Context (Simulation Snapshot):**
+${physicsContext}
+
+Provide a Socratic tip based on this state. Output strictly JSON.`;
+  
+  try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: { 
+            systemInstruction: tutorSystemInstruction,
+            responseMimeType: 'application/json'
+        }
+      });
+
+      return JSON.parse(response.text) as TutorResponse;
+  } catch (error) {
+      console.error("Tutor AI Error:", error);
+      return { type: 'syntax', message: "Keep exploring! What's your next move?" };
+  }
 };
 
 

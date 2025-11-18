@@ -4,7 +4,7 @@ import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import CircuitCanvas from './components/CircuitCanvas';
 import RightPanel from './components/RightPanel';
-import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus, ReplaceCircuitPayload, Backend } from './types';
+import type { PlacedGate, QuantumGate, Message, AIAction, AgentStatusUpdate, SimulationResult, AddGatePayload, CircuitState, PlacedItem, CustomGateDefinition, RightPanelTab, JobStatus, ReplaceCircuitPayload, Backend, TutorResponse } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import QuantumGateComponent from './components/QuantumGate';
 import { getAgentResponse, getTutorResponse, generateQiskitCode, generateCirqCode, managerSystemInstruction } from './services/geminiService';
@@ -96,7 +96,7 @@ export const App: React.FC = () => {
 
   // --- Tutor Mode State ---
   const [isTutorModeActive, setIsTutorModeActive] = useState(false);
-  const [tutorMessage, setTutorMessage] = useState<string | null>(null);
+  const [tutorResponse, setTutorResponse] = useState<TutorResponse | null>(null);
   const [isTutorLoading, setIsTutorLoading] = useState(false);
   const tutorTimerRef = useRef<number | null>(null);
 
@@ -164,10 +164,10 @@ export const App: React.FC = () => {
     setSimulationResult(result);
   }, [placedItems, numQubits, simulationStep, customGateDefinitions, depolarizingError, phaseDampingError]);
 
-  // --- Live AI Tutor ---
+  // --- Live AI Tutor (Tutor 2.0) ---
   useEffect(() => {
     if (!isTutorModeActive || placedItems.length === 0) {
-      setTutorMessage(null);
+      setTutorResponse(null);
       setIsTutorLoading(false);
       if (tutorTimerRef.current) clearTimeout(tutorTimerRef.current);
       return;
@@ -181,12 +181,23 @@ export const App: React.FC = () => {
 
     tutorTimerRef.current = window.setTimeout(async () => {
       try {
-        const circuitDescription = JSON.stringify(placedItems.map(g => ('gateId' in g ? { gate: g.gateId, qubit: g.qubit, control: g.controlQubit } : { customGate: g.customGateId, qubit: g.qubit })).slice(-3));
-        const response = await getTutorResponse(circuitDescription, numQubits);
-        setTutorMessage(response);
+        // Send recent gates with parameters
+        const circuitDescription = JSON.stringify(placedItems.map(g => ('gateId' in g ? { gate: g.gateId, qubit: g.qubit, control: g.controlQubit, params: g.params } : { customGate: g.customGateId, qubit: g.qubit })).slice(-5));
+        
+        // Compute Physics Snapshot for the Tutor
+        const physicsContext = simulationResult ? {
+             qubitStates: simulationResult.qubitStates.map((q, i) => ({
+                 index: i,
+                 purity: q.purity.toFixed(2),
+                 bloch: { x: q.blochSphereCoords.x.toFixed(2), y: q.blochSphereCoords.y.toFixed(2), z: q.blochSphereCoords.z.toFixed(2) }
+             }))
+        } : {};
+        
+        const response = await getTutorResponse(circuitDescription, numQubits, JSON.stringify(physicsContext));
+        setTutorResponse(response);
       } catch (error) {
         console.error("Tutor AI error:", error);
-        setTutorMessage("I had trouble analyzing that. Please try a different action.");
+        setTutorResponse({ type: 'syntax', message: "I had trouble analyzing that. Please try a different action." });
       } finally {
         setIsTutorLoading(false);
       }
@@ -197,7 +208,7 @@ export const App: React.FC = () => {
         clearTimeout(tutorTimerRef.current);
       }
     };
-  }, [placedItems, numQubits, isTutorModeActive]);
+  }, [placedItems, numQubits, isTutorModeActive, simulationResult]); // Added simulationResult dependency
 
 
   // --- Item Selection & Deletion & Keyboard Nav ---
@@ -936,9 +947,9 @@ export const App: React.FC = () => {
       </AnimatePresence>
       
       <TutorNotification
-        message={tutorMessage}
+        response={tutorResponse}
         isLoading={isTutorLoading}
-        onDismiss={() => setTutorMessage(null)}
+        onDismiss={() => setTutorResponse(null)}
       />
     </div>
   );

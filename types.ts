@@ -78,6 +78,11 @@ export interface AIResponse {
   sources?: Source[];
 }
 
+export interface TutorResponse {
+    type: 'syntax' | 'physics' | 'hardware';
+    message: string;
+}
+
 // UI Message Types
 export interface TextMessage {
   type: 'text';
