@@ -123,7 +123,6 @@ export const App: React.FC = () => {
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [projectModalMode, setProjectModalMode] = useState<'save' | 'load'>('save');
 
-
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragInfoRef = useRef<{ component: QuantumGate | CustomGateDefinition | null }>({ component: null });
 
@@ -145,6 +144,7 @@ export const App: React.FC = () => {
     };
     initializeChat();
   }, []);
+
   
   // --- Toast Auto-Dismiss ---
   useEffect(() => {
@@ -169,7 +169,7 @@ export const App: React.FC = () => {
     }
   }, []); // Empty array ensures this runs only once on mount
 
-  // --- Live & Stepped Simulation Engine ---
+  // --- Live & Stepped Simulation Engine (Main Thread Async) ---
   useEffect(() => {
     // Throttle simulation for large qubit counts
     if (numQubits > MAX_LIVE_SIMULATION_QUBITS) {
@@ -177,16 +177,31 @@ export const App: React.FC = () => {
         return;
     }
 
-    let itemsForSimulation = placedItems;
-    if (simulationStep !== null) {
-      const sortedItems = [...placedItems].sort((a, b) => a.left - b.left);
-      itemsForSimulation = sortedItems.slice(0, simulationStep);
-    }
-    const result = simulate(itemsForSimulation, numQubits, customGateDefinitions, {
-        depolarizing: depolarizingError,
-        phaseDamping: phaseDampingError,
-    });
-    setSimulationResult(result);
+    // Debounce and execute async to avoid blocking the main thread immediately on render
+    const timer = setTimeout(() => {
+        let itemsForSimulation = placedItems;
+        if (simulationStep !== null) {
+            const sortedItems = [...placedItems].sort((a, b) => a.left - b.left);
+            itemsForSimulation = sortedItems.slice(0, simulationStep);
+        }
+        
+        const noise = {
+            depolarizing: depolarizingError,
+            phaseDamping: phaseDampingError,
+        };
+
+        try {
+             // The simulate function is synchronous CPU work, but wrapping in setTimeout allows UI updates to flush first
+             const result = simulate(itemsForSimulation, numQubits, customGateDefinitions, noise);
+             setSimulationResult(result);
+        } catch (e) {
+            console.error("Simulation failed", e);
+        }
+
+    }, 10);
+
+    return () => clearTimeout(timer);
+
   }, [placedItems, numQubits, simulationStep, customGateDefinitions, depolarizingError, phaseDampingError]);
 
   // --- Live AI Tutor (Tutor 2.0) ---
@@ -305,7 +320,8 @@ export const App: React.FC = () => {
                          if (shift) newQubit = Math.max(0, Math.min(numQubits - 1, newQubit + deltaQubit));
                          
                          let newLeft = item.left;
-                         if (!shift && deltaLeft !== 0) newLeft = Math.max(0, Math.min(100, newLeft + deltaLeft * 2)); // Nudge
+                         // Updated: Remove clamp at 100 to allow endless expansion
+                         if (!shift && deltaLeft !== 0) newLeft = Math.max(0, newLeft + deltaLeft * 2); // Nudge
                          
                          // Basic Control Qubit logic update (simple shift)
                          let newControl = ('gateId' in item && item.controlQubit !== undefined) ? item.controlQubit : undefined;
@@ -329,7 +345,8 @@ export const App: React.FC = () => {
               if (event.key === 'ArrowUp') newQubit = Math.max(0, newQubit - 1);
               if (event.key === 'ArrowDown') newQubit = Math.min(numQubits - 1, newQubit + 1);
               if (event.key === 'ArrowLeft') newGridIndex = Math.max(0, newGridIndex - 1);
-              if (event.key === 'ArrowRight') newGridIndex = Math.min(9, newGridIndex + 1); // 10 columns
+              // Updated: Remove clamp at 9 (10 columns) to allow infinite scrolling
+              if (event.key === 'ArrowRight') newGridIndex = newGridIndex + 1; 
               
               return { qubit: newQubit, gridIndex: newGridIndex };
           });
@@ -683,6 +700,7 @@ export const App: React.FC = () => {
 
     const canvasRect = canvasRef.current.getBoundingClientRect();
     const scrollTop = canvasRef.current.scrollTop || 0;
+    const scrollLeft = canvasRef.current.scrollLeft || 0;
 
     if (
       point.x >= canvasRect.left && point.x <= canvasRect.right &&
@@ -696,9 +714,12 @@ export const App: React.FC = () => {
       let qubitIndex = Math.floor(relativeY / QUBIT_LINE_HEIGHT);
       qubitIndex = Math.max(0, Math.min(numQubits - 1, qubitIndex));
 
-      const relativeX = point.x - canvasRect.left - PADDING;
+      // Add scrollLeft to account for horizontal scrolling
+      const relativeX = point.x - canvasRect.left - PADDING + scrollLeft;
       const canvasContentWidth = canvasRect.width - PADDING * 2;
-      const leftPercent = Math.max(0, Math.min(100, (relativeX / canvasContentWidth) * 100));
+      
+      // Updated: Remove the 100% clamp to allow dropping beyond the initial viewport
+      const leftPercent = Math.max(0, (relativeX / canvasContentWidth) * 100);
       
       let newItem: PlacedItem;
       const gateInfo = gateMap.get(componentId);
@@ -724,7 +745,7 @@ export const App: React.FC = () => {
                   newGate.controlQubit = controlIndex;
               } else {
                   newGate.qubit = controlIndex;
-                  newGate.controlQubit = qubitIndex;
+                  newGate.controlQubit = cursorPosition.qubit;
               }
           }
           newItem = newGate;
@@ -894,6 +915,8 @@ export const App: React.FC = () => {
             ? { depolarizing: 0, phaseDamping: 0 } 
             : { depolarizing: 0.01, phaseDamping: 0.02 };
 
+        // For Hardware mock, we can still use the synchronous simulate for simplicity as it's one-off
+        // But we should use the new adaptive simulate
         const simResult = simulate(placedItems, numQubits, customGateDefinitions, noiseConfig);
         const shots = 1024;
         

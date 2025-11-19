@@ -359,7 +359,7 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
       transition={{ duration: 0.3 }}
       className="absolute inset-0 overflow-y-auto flex flex-col gap-6 text-sm text-gray-300 font-['IBM_Plex_Mono'] custom-scrollbar"
     >
-      {!hasResult && !isHardwareRunning && !hardwareResult ? (
+      {!hasResult && !isHardwareRunning && !hardwareResult && !isThrottled ? (
         <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
             <LogoIcon className="w-16 h-16 text-gray-700 mb-4" />
             <h3 className="text-lg font-semibold text-gray-400 font-['Space_Grotesk']">No Simulation Data</h3>
@@ -433,12 +433,17 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
              <div>
                 <h3 className="text-gray-400 mb-3">Measurement Probabilities</h3>
                 <div className="border border-gray-500/20 rounded-lg p-4 bg-black/20">
-                    {hasResult && (
+                    {hasResult ? (
                         <>
                         <h4 className="text-xs text-cyan-300 mb-3 uppercase tracking-wider">Ideal Simulation</h4>
                         <ProbabilityBars probabilities={result.probabilities} />
                         </>
-                    )}
+                    ) : (!isThrottled && (
+                        <div className="animate-pulse text-xs text-gray-500 mb-4 flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce"></div>
+                            Calculating ideal simulation...
+                        </div>
+                    ))}
 
                     <AnimatePresence>
                     {(isHardwareRunning || hardwareResult) && (
@@ -448,7 +453,7 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
                             exit={{ opacity: 0 }}
                             className={hasResult ? "mt-4" : ""}
                         >
-                            {hasResult && <div className="h-px bg-gray-700/50 my-4"></div>}
+                            {(hasResult || !isThrottled) && <div className="h-px bg-gray-700/50 my-4"></div>}
                             <h4 className="text-xs text-purple-300 mb-3 uppercase tracking-wider">Hardware Run Results</h4>
                             {isHardwareRunning && !hardwareResult && (
                                 <div className="flex items-center justify-center h-24 text-gray-500">

@@ -11,6 +11,129 @@ if (!API_KEY) {
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 const model = 'gemini-2.5-pro';
 
+// --- Quantum Script Compiler ---
+// Parses text-based circuit commands into positioned gate payloads.
+const compileQuantumScript = (script: string): { qubitCount: number, gates: AddGatePayload[] } => {
+    const lines = script.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+    let qubitCount = 0; // 0 means don't change unless specified
+    const gates: AddGatePayload[] = [];
+    
+    // Layout tracking: track the right-most position (in %) for each qubit
+    const qubitCursors: number[] = new Array(128).fill(5); // Start at 5%
+    const GATE_WIDTH = 6; // Percentage width roughly
+    const GAP = 2;
+
+    const getCursor = (indices: number[]) => {
+        let max = 0;
+        indices.forEach(i => { max = Math.max(max, qubitCursors[i] || 5); });
+        return max;
+    };
+
+    const advanceCursor = (indices: number[], newPos: number) => {
+        indices.forEach(i => { qubitCursors[i] = newPos + GATE_WIDTH + GAP; });
+    };
+    
+    // Parse ranges "0-5" -> [0,1,2,3,4,5]
+    const parseIndices = (arg: string): number[] => {
+        if (!arg) return [];
+        const parts = arg.split(','); // Handle comma separated too
+        const indices: number[] = [];
+        for (const part of parts) {
+             if (part.includes('-')) {
+                 const [s, e] = part.split('-').map(n => parseInt(n,10));
+                 if (!isNaN(s) && !isNaN(e)) {
+                     for(let i=s; i<=e; i++) indices.push(i);
+                 }
+             } else {
+                 const n = parseInt(part, 10);
+                 if (!isNaN(n)) indices.push(n);
+             }
+        }
+        return indices;
+    };
+
+    for (const line of lines) {
+        // Simple tokenizer: splits by spaces, ignoring empty
+        const tokens = line.match(/([^\s,]+)/g) || [];
+        if (tokens.length === 0) continue;
+
+        const command = tokens[0].toUpperCase();
+
+        if (command === 'QUBITS') {
+            qubitCount = parseInt(tokens[1], 10);
+            continue;
+        }
+
+        // Gate Parsing
+        let gateToken = tokens[0]; // e.g. RX(pi/2) or CNOT
+        let params: { [key: string]: string } | undefined = undefined;
+        
+        // Extract params: GATE(param)
+        if (gateToken.includes('(')) {
+            const match = gateToken.match(/^([a-zA-Z0-9]+)\((.+)\)$/);
+            if (match) {
+                gateToken = match[1];
+                params = { theta: match[2] };
+            }
+        }
+        
+        let gateId = gateToken.toLowerCase();
+        // Aliases
+        if (gateId === 'cx') gateId = 'cnot';
+        if (gateId === 'm') gateId = 'measure';
+        
+        const gateDef = gateMap.get(gateId);
+        if (!gateDef) continue;
+
+        const args = tokens.slice(1);
+        if (args.length === 0) continue;
+
+        if (gateDef.type === 'single') {
+            // All args are targets
+            let targets: number[] = [];
+            args.forEach(arg => targets.push(...parseIndices(arg)));
+            targets = [...new Set(targets)].sort((a,b) => a-b); // Unique & sorted
+
+            if (targets.length === 0) continue;
+
+            const startPos = getCursor(targets);
+            
+            // Use batched add for single gates
+            gates.push({
+                gateId,
+                qubit: targets[0], // Fix: satisfy mandatory 'qubit' property
+                qubits: targets,
+                left: startPos,
+                params
+            });
+            
+            advanceCursor(targets, startPos);
+
+        } else if (gateDef.type === 'control') {
+            // Enforce pairs for 2-qubit gates: CONTROL TARGET
+            if (args.length >= 2) {
+                const c = parseInt(args[0], 10);
+                const t = parseInt(args[1], 10);
+
+                if (!isNaN(c) && !isNaN(t)) {
+                    const startPos = getCursor([c, t]);
+                    gates.push({
+                        gateId,
+                        controlQubit: c,
+                        qubit: t,
+                        left: startPos,
+                        params
+                    });
+                    advanceCursor([c, t], startPos);
+                }
+            }
+        }
+    }
+
+    return { qubitCount, gates };
+};
+
+
 // --- Tool Declarations ---
 const gateIds = Array.from(gateMap.keys());
 const addGateTool: FunctionDeclaration = { 
@@ -54,13 +177,28 @@ const replaceCircuitTool: FunctionDeclaration = {
     } 
 };
 
+const compileCircuitTool: FunctionDeclaration = {
+    name: 'compile_circuit',
+    description: "Compiles a text-based quantum circuit script into a visual layout. Use this for complex circuits (>5 qubits) or algorithms (QAOA, QFT) where manual placement is difficult. The script handles layout automatically.",
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            script: { 
+                type: Type.STRING, 
+                description: "The circuit script. Syntax:\n- 'QUBITS N': Sets qubit count.\n- 'GATE TARGETS': Single qubit gates (e.g., 'H 0-4', 'X 0 2').\n- 'GATE CONTROL TARGET': Two qubit gates (e.g., 'CNOT 0 1').\n- 'GATE(PARAM) ...': Parameterized (e.g., 'RX(pi/2) 0').\nSupported Gates: H, X, Y, Z, S, T, RX, RY, RZ, CNOT, CZ, SWAP, MEASURE." 
+            }
+        },
+        required: ['script']
+    }
+};
+
 const getSimulationResultsTool: FunctionDeclaration = { name: 'get_simulation_results', parameters: { type: Type.OBJECT, properties: {} } };
 const setQubitCountTool: FunctionDeclaration = { 
   name: 'set_qubit_count', 
   description: "Sets the number of qubits on the canvas. Must be between 2 and 127. **Warning:** This action will clear all existing gates from the circuit.",
   parameters: { type: Type.OBJECT, properties: { qubit_count: { type: Type.INTEGER, description: "The desired number of qubits (2-127)." } }, required: ['qubit_count'] } 
 };
-const designTools = [addGateTool, replaceCircuitTool, getSimulationResultsTool, setQubitCountTool];
+const designTools = [addGateTool, replaceCircuitTool, compileCircuitTool, getSimulationResultsTool, setQubitCountTool];
 
 // --- Agent System Instructions ---
 const staticGateLibrary = gates.map(g => {
@@ -74,6 +212,7 @@ const sotaConceptsLibrary = `
 - **Quantum Teleportation:** A protocol to transmit a quantum state from one location to another using a pre-shared Bell pair and classical communication. Requires 3 qubits.
 - **Deutsch-Jozsa Algorithm:** A simple but powerful demonstration of quantum parallelism, determining if a function is constant or balanced in a single evaluation. Requires N+1 qubits for an N-bit function.
 - **Variational Quantum Eigensolver (VQE) Ansatz:** Uses parameterized rotation gates (RX, RY, RZ) to prepare a trial wavefunction. Used for finding ground state energies.
+- **QAOA (Quantum Approximate Optimization Algorithm):** Used for solving combinatorial optimization problems. Typically involves layers of Hadamard gates, Cost Hamiltonians (ZZ interactions), and Mixer Hamiltonians (X rotations).
 `;
 
 const environmentCapabilities = `
@@ -181,8 +320,9 @@ The complete and exhaustive set of available gate IDs is: ${definitiveGateIdList
 **Available Components & Tools:**
 ${dynamicGateLibrary}
 - **Set Qubit Count (tool: 'set_qubit_count')**: Changes the number of qubits on the canvas (from 2-127). This will clear the board.
+- **Compile Circuit (tool: 'compile_circuit')**: **HIGHLY RECOMMENDED** for complex circuits (>5 qubits) or algorithms (QAOA, QFT). You provide a simple text script (e.g., "H 0-9\\nCZ 0 1..."), and the system automatically calculates layout coordinates. This prevents errors with large JSON payloads.
 - **Add Gate (tool: 'add_gate')**: Adds a single gate to the circuit. Supports adding to multiple qubits at once via 'qubits' array.
-- **Replace Circuit (tool: 'replace_circuit')**: Replaces the entire circuit with a new set of gates. PREFER this for building new circuits from scratch.
+- **Replace Circuit (tool: 'replace_circuit')**: Replaces the entire circuit with a new set of gates. PREFER this for building small, simple circuits from scratch.
 - **Get Simulation Results (tool: 'get_simulation_results')**: Retrieves the current state vector and measurement probabilities.
 
 **CRITICAL 4-STEP EXECUTION PROCESS:**
@@ -190,31 +330,27 @@ You MUST follow this internal monologue process before calling any tools.
 
 **Phase 0: Canvas & Requirement Check (Internal Monologue).**
 Before placing any gates, analyze the *required number of qubits* for the requested circuit.
-- If the user asks for a specific number (e.g., "10-qubit QAOA") or a complex algorithm that typically requires more qubits than the current count (${numQubits}), you MUST plan to call \`set_qubit_count(n)\` FIRST in your response.
-- Do not try to fit a large circuit into a small canvas. Always resize the canvas explicitly if the algorithm demands it.
+- If the user asks for a specific number (e.g., "10-qubit QAOA") or a complex algorithm that typically requires more qubits than the current count (${numQubits}), you MUST plan to set the qubit count correctly.
 
-**Phase 1: Pre-computation (Internal Monologue).**
-Based on the high-level prompt you received (e.g., "Build the 5-qubit error correcting code"), formulate an initial plan of which tools and gates you *intend* to use.
-*Example Internal Monologue:* "To build the 5-qubit code, I will need H, X, Z, and CNOT gates. I will use the 'set_qubit_count' tool to set 5 qubits, and then the 'replace_circuit' tool with a payload of these gates."
+**Phase 1: Tool Selection (Internal Monologue).**
+- **Small/Simple Circuit (< 6 qubits):** Use 'set_qubit_count' then 'replace_circuit' (or 'add_gate'). It's fine to calculate coordinates manually.
+- **Large/Complex Circuit (>= 6 qubits, or QAOA, QFT, Shor's):** DO NOT calculate coordinates manually. It is too error-prone. **YOU MUST USE THE 'compile_circuit' TOOL.** Write a script.
+    - *Script Syntax:* 
+        - "QUBITS N" (optional if you used set_qubit_count tool, but good to include)
+        - "GATE TARGETS" (e.g., "H 0-9", "X 0 2 4")
+        - "GATE CONTROL TARGET" (e.g., "CX 0 1", "CZ 5 6")
+        - "GATE(PARAM) TARGET" (e.g., "RX(pi/2) 0")
 
 **Phase 2: Self-Critique against Constraints (Internal Monologue).**
-Compare your pre-computed plan from Phase 1 against the **Original User Request** and the **Definitive Component Checklist**. Identify any constraints that your initial plan fails to meet.
-*Example Internal Monologue:* "My initial plan uses H, X, Z, and CNOT. The Original User Request includes the constraint 'use all the quantum gates'. My plan fails this constraint because it omits several gates from the definitive checklist, including 'measure'. My plan is incomplete."
+Compare your plan against the **Original User Request** and the **Definitive Component Checklist**.
 
-**Phase 3: Self-Correction and Final Execution.**
-If Phase 2 reveals a failure, you MUST generate a new, corrected plan and then execute it by calling the necessary tools.
-*   **Efficiency Rule for Large Circuits:** If you need to apply the same single-qubit gate (like 'h', 'measure', or 'rx') to many qubits at the same vertical position (e.g., "Hadamard on all 10 qubits"), you MUST use the **\`qubits\` array parameter** instead of creating individual gate objects.
-    *   *Correct:* \`{ gateId: 'h', qubits: [0, 1, 2, 3, 4], left: 5 }\`
-    *   *Incorrect:* \`{ gateId: 'h', qubit: 0, left: 5 }, { gateId: 'h', qubit: 1, left: 5 }...\`
-    This is critical for performance and preventing errors on large circuits like QAOA or QFT.
+**Phase 3: Execution.**
+Execute the plan by calling the chosen tool.
 
-**Two-Part Correction Algorithm (if needed):**
-1.  **Part A: Build the Conceptual Circuit.** First, use your tools (e.g., \`replace_circuit\`) to build the primary, conceptually-rich circuit requested by the user (like the 5-qubit error-correcting code).
-2.  **Part B: Algorithmic Completion.** Second, determine the set of \`gateId\`s from the **Definitive Component Checklist** that were NOT used in Part A. You will then iterate through this set of *missing* gates and use the \`add_gate\` tool to place each one.
-    *   **Rule for Measurement:** If the \`'measure'\` gate is in the set of missing gates, you MUST add it to **all qubits** at the very end of the circuit (e.g., at \`left: 95\`). Use the \`qubits\` array!
-    *   **Rule for Other Gates:** Place the other missing unitary gates on available qubits at subsequent positions after the main circuit (e.g., \`left: 80\`, \`left: 85\`), ensuring they are all present.
+**Efficiency Rule for Large Circuits:** If you are NOT using 'compile_circuit' and must use 'add_gate' for a large layer (e.g. "H on 10 qubits"), you MUST use the **\`qubits\` array parameter**.
+    *   *Correct:* \`{ gateId: 'h', qubits: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], left: 5 }\`
 
-Your final output should ONLY be the tool calls required to build the corrected circuit. Do not output your internal monologue.`;
+Your final output should ONLY be the tool calls.`;
 }
 
 const debuggerAgentSystemInstruction = (circuitDescription: string) => `You are the Debugger Agent for Milimo AI, a quantum circuit expert. Your job is to analyze a user's potentially faulty circuit, identify logical errors, and provide a corrected version.
@@ -461,6 +597,20 @@ ${userPromptText}
                         break;
                     case 'set_qubit_count':
                         executionContext.designActions.push({ type: 'set_qubit_count', payload: { count: (funcCall.args as any).qubit_count }});
+                        break;
+                    case 'compile_circuit':
+                        // --- QASM-Lite Compiler execution ---
+                        const script = (funcCall.args as any).script;
+                        const compiled = compileQuantumScript(script);
+                        
+                        // If script specified Qubits count, push that action first
+                        if (compiled.qubitCount > 0) {
+                             executionContext.designActions.push({ type: 'set_qubit_count', payload: { count: compiled.qubitCount } });
+                        }
+                        // Push the computed layout as a replace_circuit action
+                        if (compiled.gates.length > 0) {
+                            executionContext.designActions.push({ type: 'replace_circuit', payload: compiled.gates });
+                        }
                         break;
                     case 'get_simulation_results':
                         break;

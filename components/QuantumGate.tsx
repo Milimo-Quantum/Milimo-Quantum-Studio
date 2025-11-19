@@ -1,4 +1,5 @@
-import React from 'react';
+
+import React, { memo } from 'react';
 import type { QuantumGate, CustomGateDefinition } from '../types';
 import GroupIcon from './icons/GroupIcon';
 
@@ -6,7 +7,7 @@ interface QuantumGateProps {
   gate: QuantumGate | CustomGateDefinition;
 }
 
-const QuantumGateComponent: React.FC<QuantumGateProps> = ({ gate }) => {
+const QuantumGateComponent: React.FC<QuantumGateProps> = memo(({ gate }) => {
   const isCustom = 'gates' in gate;
   const Icon = isCustom ? GroupIcon : gate.icon;
 
@@ -26,6 +27,6 @@ const QuantumGateComponent: React.FC<QuantumGateProps> = ({ gate }) => {
       </div>
     </div>
   );
-};
+});
 
 export default QuantumGateComponent;

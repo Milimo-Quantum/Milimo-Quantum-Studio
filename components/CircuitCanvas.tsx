@@ -78,6 +78,25 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
   const [selectionStart, setSelectionStart] = useState<{x: number, y: number} | null>(null);
   const [selectionRect, setSelectionRect] = useState<{x: number, y: number, w: number, h: number} | null>(null);
 
+  // Calculate the total width needed for the circuit
+  const maxExtent = useMemo(() => {
+      let max = 100;
+      placedItems.forEach(item => {
+          const rightEdge = item.left + 10; // Rough estimate for gate width + buffer in %
+          if (rightEdge > max) max = rightEdge;
+      });
+      // Also check cursor
+      if (cursorPosition) {
+          const cursorRight = (cursorPosition.gridIndex * 10) + 10 + 5; 
+          if (cursorRight > max) max = cursorRight;
+      }
+      return max;
+  }, [placedItems, cursorPosition]);
+
+  // Helper to scale 'left' percentage relative to the expanded container
+  const scale = (leftPercent: number) => (leftPercent / maxExtent) * 100;
+
+
   const handleItemClick = (e: React.MouseEvent, instanceId: string) => {
     e.stopPropagation();
     onSelectItem(instanceId, e.shiftKey);
@@ -122,7 +141,8 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
       if (!ref || !('current' in ref) || !ref.current) return;
 
       const rect = ref.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
+      const scrollLeft = ref.current.scrollLeft;
+      const x = e.clientX - rect.left + scrollLeft; // Correct for horizontal scroll
       const y = e.clientY - rect.top + ref.current.scrollTop; // Account for scroll
 
       setIsSelecting(true);
@@ -139,17 +159,18 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
       if (!isSelecting || !selectionStart || !ref || !('current' in ref) || !ref.current) return;
 
       const rect = ref.current.getBoundingClientRect();
-      const currentX = e.clientX - rect.left;
-      const currentY = e.clientY - rect.top + ref.current.scrollTop; // Account for scroll
+      const scrollLeft = ref.current.scrollLeft;
+      const currentX = e.clientX - rect.left + scrollLeft;
+      const currentY = e.clientY - rect.top + ref.current.scrollTop; 
 
       const x = Math.min(selectionStart.x, currentX);
       const y = Math.min(selectionStart.y, currentY);
       const w = Math.abs(currentX - selectionStart.x);
       const h = Math.abs(currentY - selectionStart.y);
 
-      // For visual rendering, we need relative to the container's current viewport
-      // The 'y' above is absolute document Y inside the scrolled container
-      // To render correctly inside the scrolled container, we can just use absolute positioning if the container is relative
+      // We still render selectionRect relative to the container's current viewport for simplicity in this layout, 
+      // but logic needs to track the absolute scroll positions.
+      // Actually, since we render selectionRect absolute inside the scrolled container, we should use the scrolled coordinates.
       setSelectionRect({ x, y, w, h });
   };
 
@@ -162,11 +183,16 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
       }
 
       const canvasRect = ref.current.getBoundingClientRect();
+      // We use the initial visible width (canvasRect.width) to determine the scale of 100%.
+      // The actual container width is (maxExtent / 100) * visibleWidth.
       const contentWidth = canvasRect.width - PADDING * 2;
 
       const intersectedIds = placedItems.filter(item => {
-          // Calculate item position in pixels
+          // Calculate item position in pixels. 
+          // item.left is in percentage of *viewport*.
+          // So we just multiply by contentWidth (100% width).
           const itemX = PADDING + (item.left / 100) * contentWidth;
+          
           const itemY = PADDING + item.qubit * QUBIT_LINE_HEIGHT + (QUBIT_LINE_HEIGHT / 2) - (GATE_HEIGHT / 2);
           const itemW = GATE_WIDTH;
           
@@ -188,15 +214,14 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
           }
 
           // AABB Intersection Check
-          // Selection Box (selectionRect includes scrollTop offset)
+          // selectionRect is in absolute scrolled pixels relative to container top-left.
           const sLeft = selectionRect.x;
           const sRight = selectionRect.x + selectionRect.w;
           const sTop = selectionRect.y;
           const sBottom = selectionRect.y + selectionRect.h;
 
           // Item Box
-          // Centered item logic adjustment
-          const iLeft = itemX - (GATE_WIDTH / 2); // Items are centered on left%
+          const iLeft = itemX - (GATE_WIDTH / 2); 
           const iRight = iLeft + itemW;
           const iTop = actualItemY;
           const iBottom = actualItemY + itemH;
@@ -227,15 +252,18 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp} // Stop selecting if leaving canvas
-      className={`flex-grow bg-black/30 backdrop-blur-sm rounded-xl border border-gray-500/20 relative overflow-y-auto custom-scrollbar transition-all duration-300 ${isDragging ? 'border-cyan-400/50 ring-2 ring-cyan-400/50' : ''}`}
+      className={`flex-grow bg-black/30 backdrop-blur-sm rounded-xl border border-gray-500/20 relative overflow-auto custom-scrollbar transition-all duration-300 ${isDragging ? 'border-cyan-400/50 ring-2 ring-cyan-400/50' : ''}`}
       style={{
         backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(100, 100, 100, 0.3) 1px, transparent 0)',
         backgroundSize: '20px 20px',
         minHeight: 0 // Ensure flex child allows scrolling
       }}
     >
-      {/* Padded Inner Container to ensure content isn't cut off */}
-      <div className="relative min-w-full min-h-full p-8 pb-20"> 
+      {/* Inner Container grows to fit content, ensuring horizontal lines stretch */}
+      <div 
+        className="relative min-h-full p-8 pb-20 transition-all duration-300 ease-out"
+        style={{ width: `${maxExtent}%`, minWidth: '100%' }}
+      > 
           <div className="absolute inset-0 bg-gradient-to-br from-transparent to-black/30 pointer-events-none z-0"></div>
           
           <div className="relative w-full flex flex-col justify-start z-10">
@@ -274,8 +302,8 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                         className="absolute z-20 pointer-events-none border-2 border-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.5)] rounded-lg"
                         style={{
                             top: cursorPosition.qubit * QUBIT_LINE_HEIGHT + 12, // Centered roughly on line
-                            left: `${cursorPosition.gridIndex * 10}%`,
-                            width: '10%',
+                            left: `${scale(cursorPosition.gridIndex * 10)}%`,
+                            width: `${scale(10)}%`,
                             height: '40px',
                         }}
                     />
@@ -288,7 +316,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                     isOpen={isQuickAddOpen}
                     position={{ 
                         top: cursorPosition.qubit * QUBIT_LINE_HEIGHT + 40,
-                        left: `${cursorPosition.gridIndex * 10}%` 
+                        left: `${scale(cursorPosition.gridIndex * 10)}%` 
                     }}
                     onClose={onCloseQuickAdd}
                     onSelectGate={onQuickAddSelect}
@@ -304,7 +332,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                         animate={{ scaleY: 1 }}
                         exit={{ scaleY: 0 }}
                         style={{
-                            left: `calc(${sortedItems[simulationStep - 1].left}%)`,
+                            left: `calc(${scale(sortedItems[simulationStep - 1].left)}%)`,
                             height: `${numQubits * QUBIT_LINE_HEIGHT}px`
                         }}
                         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
@@ -360,7 +388,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                                 exit={{ opacity: 0, scale: 0.5 }}
                                 className="absolute z-10 cursor-pointer"
                                 style={{
-                                    left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
+                                    left: `calc(${scale(placedGate.left)}% - ${GATE_WIDTH / 2}px)`,
                                     top: `${containerTop}px`,
                                     width: `${GATE_WIDTH}px`,
                                     height: `${containerHeight}px`,
@@ -404,7 +432,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                           exit={{ opacity: 0, scale: 0.5 }}
                           className="absolute z-10 cursor-pointer"
                           style={{
-                            left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
+                            left: `calc(${scale(placedGate.left)}% - ${GATE_WIDTH / 2}px)`,
                             top: `${containerTop}px`,
                             width: `${GATE_WIDTH}px`,
                             height: `${containerHeight}px`,
@@ -459,7 +487,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                       exit={{ opacity: 0, scale: 0.5 }}
                       className="absolute z-10 cursor-pointer"
                       style={{
-                        left: `calc(${placedGate.left}% - 20px)`,
+                        left: `calc(${scale(placedGate.left)}% - 20px)`,
                         top: `${top - 20}px`,
                       }}
                       onClick={(e) => handleItemClick(e, placedGate.instanceId)}
@@ -499,7 +527,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                           exit={{ opacity: 0, scale: 0.5 }}
                           className="absolute z-10 cursor-pointer"
                           style={{
-                            left: `calc(${placedCustomGate.left}% - 40px)`,
+                            left: `calc(${scale(placedCustomGate.left)}% - 40px)`,
                             top: `${top}px`,
                             width: '80px',
                             height: `${height}px`,
