@@ -21,6 +21,10 @@ const INITIAL_STATE: CircuitState = {
   customGateDefinitions: [],
 };
 
+// Threshold for disabling live browser-based simulation
+const MAX_LIVE_SIMULATION_QUBITS = 15; 
+const MAX_QUBITS = 127;
+
 const encodeCircuit = (data: CircuitState): string => {
   try {
     const jsonString = JSON.stringify(data);
@@ -85,6 +89,9 @@ export const App: React.FC = () => {
   // --- Keyboard Navigation State ---
   const [cursorPosition, setCursorPosition] = useState<{ qubit: number, gridIndex: number } | null>(null);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  
+  // --- UI Feedback State ---
+  const [toast, setToast] = useState<{ message: string, type: 'info' | 'warning' | 'error' } | null>(null);
 
 
   const [messages, setMessages] = useState<Message[]>([
@@ -138,6 +145,14 @@ export const App: React.FC = () => {
     };
     initializeChat();
   }, []);
+  
+  // --- Toast Auto-Dismiss ---
+  useEffect(() => {
+      if (toast) {
+          const timer = setTimeout(() => setToast(null), 5000);
+          return () => clearTimeout(timer);
+      }
+  }, [toast]);
 
   // --- Load from URL on mount ---
   useEffect(() => {
@@ -156,6 +171,12 @@ export const App: React.FC = () => {
 
   // --- Live & Stepped Simulation Engine ---
   useEffect(() => {
+    // Throttle simulation for large qubit counts
+    if (numQubits > MAX_LIVE_SIMULATION_QUBITS) {
+        setSimulationResult(null);
+        return;
+    }
+
     let itemsForSimulation = placedItems;
     if (simulationStep !== null) {
       const sortedItems = [...placedItems].sort((a, b) => a.left - b.left);
@@ -175,6 +196,11 @@ export const App: React.FC = () => {
       setIsTutorLoading(false);
       if (tutorTimerRef.current) clearTimeout(tutorTimerRef.current);
       return;
+    }
+    
+    // Disable Tutor physics insight for large circuits
+    if (numQubits > MAX_LIVE_SIMULATION_QUBITS) {
+        return;
     }
 
     if (tutorTimerRef.current) {
@@ -212,7 +238,7 @@ export const App: React.FC = () => {
         clearTimeout(tutorTimerRef.current);
       }
     };
-  }, [placedItems, numQubits, isTutorModeActive, simulationResult]); // Added simulationResult dependency
+  }, [placedItems, numQubits, isTutorModeActive, simulationResult]); 
 
 
   // --- Item Selection & Deletion & Keyboard Nav ---
@@ -374,7 +400,7 @@ export const App: React.FC = () => {
   };
 
   const handleNumQubitsChange = useCallback((newNumQubits: number) => {
-    if (newNumQubits >= 2 && newNumQubits <= 5) {
+    if (newNumQubits >= 2 && newNumQubits <= MAX_QUBITS) {
         // Smart Resize: Filter items that are now out of bounds
         const validItems = state.placedItems.filter(item => {
             if ('gateId' in item) {
@@ -413,39 +439,106 @@ export const App: React.FC = () => {
 
 
   const executeActions = useCallback((actions: AIAction[]) => {
-    // 1. Determine the final number of qubits. This is the ground truth for all subsequent validation.
+    // 1. Determine the base qubit count requested by the AI.
     const setQubitAction = actions.find((a): a is { type: 'set_qubit_count'; payload: { count: number } } => a.type === 'set_qubit_count');
-    const finalNumQubits = setQubitAction ? setQubitAction.payload.count : numQubits;
+    const replaceAction = actions.find((a): a is { type: 'replace_circuit'; payload: ReplaceCircuitPayload } => a.type === 'replace_circuit');
+    const clearAction = actions.find(a => a.type === 'clear_circuit');
+    const addActions = actions.filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate');
 
-    if (finalNumQubits < 2 || finalNumQubits > 5) {
+    // Initial assumption of final qubit count
+    let finalNumQubits = setQubitAction ? setQubitAction.payload.count : numQubits;
+
+    // --- Smart Canvas Expansion Logic ---
+    // Calculate the maximum qubit index required by ALL pending gates.
+    let maxRequiredQubit = -1;
+
+    // Helper to get max qubit from a payload, accounting for batches
+    const checkPayloadMaxQubit = (p: AddGatePayload) => {
+        if (p.qubits) {
+            p.qubits.forEach(q => {
+                maxRequiredQubit = Math.max(maxRequiredQubit, q);
+            });
+        }
+        if (p.qubit !== undefined) maxRequiredQubit = Math.max(maxRequiredQubit, p.qubit);
+        if (p.controlQubit !== undefined) maxRequiredQubit = Math.max(maxRequiredQubit, p.controlQubit);
+    }
+
+    // Check gates from 'replace_circuit'
+    if (replaceAction) {
+        replaceAction.payload.forEach(g => checkPayloadMaxQubit(g));
+    } else if (!setQubitAction && !clearAction) {
+        // Preserving existing items, check them too
+        placedItems.forEach(item => {
+            if ('gateId' in item) {
+                maxRequiredQubit = Math.max(maxRequiredQubit, item.qubit);
+                if (item.controlQubit !== undefined) maxRequiredQubit = Math.max(maxRequiredQubit, item.controlQubit);
+            } else if ('customGateId' in item) {
+                 const def = state.customGateDefinitions.find(d => d.id === item.customGateId);
+                 if (def) {
+                     const maxRel = Math.max(...def.gates.map(g => Math.max(g.qubit, g.controlQubit ?? 0)));
+                     maxRequiredQubit = Math.max(maxRequiredQubit, item.qubit + maxRel);
+                 } else {
+                     maxRequiredQubit = Math.max(maxRequiredQubit, item.qubit);
+                 }
+            }
+        });
+    }
+
+    // Check gates from 'add_gate'
+    addActions.forEach(a => checkPayloadMaxQubit(a.payload));
+
+    // Apply Expansion
+    if (maxRequiredQubit >= finalNumQubits) {
+        const required = maxRequiredQubit + 1;
+        if (required <= MAX_QUBITS) {
+            console.log(`Smart Expansion: Upgrading from ${finalNumQubits} to ${required} qubits to fit circuit.`);
+            finalNumQubits = required;
+            setToast({ message: `Expanded canvas to ${finalNumQubits} qubits to fit design.`, type: 'info' });
+        } else {
+            setToast({ message: `Warning: Circuit requires ${required} qubits, exceeding limit of ${MAX_QUBITS}.`, type: 'warning' });
+            // We let it clamp at validation step
+        }
+    }
+    
+    if (finalNumQubits < 2 || finalNumQubits > MAX_QUBITS) {
         console.error("AI requested an invalid number of qubits:", finalNumQubits);
-        return; // Abort if qubit count is out of bounds.
+        return;
     }
 
     // 2. Establish the baseline circuit state before applying additive changes.
     let baseItems: PlacedItem[] = [...placedItems]; // Start with current state by default.
     
-    const replaceAction = actions.find((a): a is { type: 'replace_circuit'; payload: ReplaceCircuitPayload } => a.type === 'replace_circuit');
-    const clearAction = actions.find(a => a.type === 'clear_circuit');
+    // Helper to unroll batched gates (qubits array -> multiple items)
+    const expandPayload = (payload: AddGatePayload): PlacedGate[] => {
+        if (payload.qubits && Array.isArray(payload.qubits) && payload.qubits.length > 0) {
+             // Batched gate creation
+             return payload.qubits.map((q: number) => ({
+                 ...payload,
+                 qubit: q,
+                 qubits: undefined, // Remove the batch array from the final item
+                 instanceId: `temp-batch-${Date.now()}-${Math.random()}`
+             }));
+        }
+        // Standard single gate creation
+        return [{ ...payload, instanceId: `temp-${Date.now()}-${Math.random()}` }];
+    };
 
     if (replaceAction) {
         // A replace action is definitive and ignores the current state. All items will be PlacedGate.
-        baseItems = replaceAction.payload.map((g, i) => ({
-            ...g,
-            instanceId: `temp-replace-${i}`
-        }));
+        baseItems = [];
+        replaceAction.payload.forEach(item => {
+             baseItems.push(...expandPayload(item));
+        });
     } else if (setQubitAction || clearAction) {
         // A qubit change or explicit clear results in an empty canvas.
         baseItems = [];
     }
     
-    // 3. Apply any additive actions on top of the baseline. These are also PlacedGate.
-    const addActions = actions.filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate');
-    
-    const addedItems: PlacedGate[] = addActions.map((a, i) => ({
-        ...a.payload,
-        instanceId: `temp-add-${i}`
-    }));
+    // 3. Apply any additive actions on top of the baseline.
+    const addedItems: PlacedGate[] = [];
+    addActions.forEach(action => {
+        addedItems.push(...expandPayload(action.payload));
+    });
 
     const finalItemsRaw = [...baseItems, ...addedItems];
     
@@ -473,6 +566,7 @@ export const App: React.FC = () => {
 
     if (validatedPlacedItems.length < finalItemsRaw.length) {
         console.warn("Some items were discarded by the validator as they were invalid for the final qubit count.");
+        setToast({ message: "Warning: Some gates were invalid for the current qubit count and were discarded.", type: 'warning' });
     }
     
     // 5. Atomically apply the final state to React history.
@@ -588,6 +682,8 @@ export const App: React.FC = () => {
     setCursorPosition(null);
 
     const canvasRect = canvasRef.current.getBoundingClientRect();
+    const scrollTop = canvasRef.current.scrollTop || 0;
+
     if (
       point.x >= canvasRect.left && point.x <= canvasRect.right &&
       point.y >= canvasRect.top && point.y <= canvasRect.bottom
@@ -595,7 +691,8 @@ export const App: React.FC = () => {
       const PADDING = 32;
       const QUBIT_LINE_HEIGHT = 64;
 
-      const relativeY = point.y - canvasRect.top - PADDING;
+      // Add scrollTop to account for vertical scrolling within the canvas
+      const relativeY = point.y - canvasRect.top - PADDING + scrollTop;
       let qubitIndex = Math.floor(relativeY / QUBIT_LINE_HEIGHT);
       qubitIndex = Math.max(0, Math.min(numQubits - 1, qubitIndex));
 
@@ -879,7 +976,7 @@ export const App: React.FC = () => {
         <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre-v2.png')] opacity-20"></div>
       </div>
       
-      <div className="relative z-10 flex flex-col flex-grow">
+      <div className="relative z-10 flex flex-col flex-grow h-screen"> {/* Ensure h-screen for layout */}
         <Header 
             onShowVisualization={handleShowVisualization}
             onUndo={undo}
@@ -892,16 +989,16 @@ export const App: React.FC = () => {
             isTutorModeActive={isTutorModeActive}
             onToggleTutorMode={handleToggleTutorMode}
         />
-         <div className="px-4 pt-2">
+         <div className="px-4 pt-2 flex-shrink-0">
             <span className="text-xs font-mono bg-gray-700/50 text-gray-400 px-2 py-0.5 rounded">Preview</span>
         </div>
-        <main className="flex flex-grow p-4 gap-4">
+        <main className="flex flex-grow p-4 gap-4 min-h-0 overflow-hidden"> {/* min-h-0 is key for nested scroll */}
           <LeftPanel 
             onDragInitiate={handleDragInitiate} 
             draggingComponentId={draggingComponent?.component.id} 
             customGates={customGateDefinitions}
           />
-          <div className="flex-grow flex flex-col gap-4 relative">
+          <div className="flex-grow flex flex-col gap-4 relative min-h-0">
             <CircuitCanvas 
               ref={canvasRef}
               numQubits={numQubits}
@@ -973,6 +1070,31 @@ export const App: React.FC = () => {
         isLoading={isTutorLoading}
         onDismiss={() => setTutorResponse(null)}
       />
+
+      {/* Global Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: 20, x: '-50%' }}
+            transition={{ duration: 0.3 }}
+            className={`fixed bottom-20 left-1/2 px-4 py-3 rounded-lg shadow-2xl backdrop-blur-md border z-50 text-sm font-mono flex items-center gap-3 ${
+              toast.type === 'warning' 
+                ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-200 shadow-[0_0_15px_rgba(234,179,8,0.2)]' 
+                : 'bg-cyan-500/20 border-cyan-500/50 text-cyan-200 shadow-[0_0_15px_rgba(34,211,238,0.2)]'
+            }`}
+          >
+             <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${toast.type === 'warning' ? 'bg-yellow-500/30' : 'bg-cyan-500/30'}`}>
+                 {toast.type === 'warning' 
+                    ? <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-yellow-400"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg> 
+                    : <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-cyan-400"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
+                 }
+             </div>
+             {toast.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
           {isProjectModalOpen && (

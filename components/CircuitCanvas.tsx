@@ -123,11 +123,11 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
 
       const rect = ref.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const y = e.clientY - rect.top + ref.current.scrollTop; // Account for scroll
 
       setIsSelecting(true);
       setSelectionStart({ x, y });
-      setSelectionRect({ x, y, w: 0, h: 0 });
+      setSelectionRect({ x, y: y - ref.current.scrollTop, w: 0, h: 0 }); // Store relative to viewport for rendering
       
       // Clear selection if not holding shift (standard behavior)
       if (!e.shiftKey && onMultiSelect) {
@@ -140,13 +140,16 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
 
       const rect = ref.current.getBoundingClientRect();
       const currentX = e.clientX - rect.left;
-      const currentY = e.clientY - rect.top;
+      const currentY = e.clientY - rect.top + ref.current.scrollTop; // Account for scroll
 
       const x = Math.min(selectionStart.x, currentX);
       const y = Math.min(selectionStart.y, currentY);
       const w = Math.abs(currentX - selectionStart.x);
       const h = Math.abs(currentY - selectionStart.y);
 
+      // For visual rendering, we need relative to the container's current viewport
+      // The 'y' above is absolute document Y inside the scrolled container
+      // To render correctly inside the scrolled container, we can just use absolute positioning if the container is relative
       setSelectionRect({ x, y, w, h });
   };
 
@@ -181,14 +184,11 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                    const maxRelativeQubit = Math.max(...def.gates.map(g => g.controlQubit ?? g.qubit), ...def.gates.map(g => g.qubit));
                    itemH = (maxRelativeQubit + 1) * QUBIT_LINE_HEIGHT;
                    actualItemY = PADDING + item.qubit * QUBIT_LINE_HEIGHT;
-                   // Custom gate width visual approximation
-                   // In render it is 80px wide, 40px left of center point
-                   // center point is itemX
               }
           }
 
           // AABB Intersection Check
-          // Selection Box
+          // Selection Box (selectionRect includes scrollTop offset)
           const sLeft = selectionRect.x;
           const sRight = selectionRect.x + selectionRect.w;
           const sTop = selectionRect.y;
@@ -209,8 +209,6 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
           );
       }).map(i => i.instanceId);
 
-      // Merge with existing if Shift held? For now, let's just set new selection.
-      // Could implement standard shift-add logic here if needed.
       onMultiSelect(intersectedIds);
 
       setIsSelecting(false);
@@ -229,172 +227,230 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp} // Stop selecting if leaving canvas
-      className={`flex-grow bg-black/30 backdrop-blur-sm rounded-xl border border-gray-500/20 p-8 relative overflow-hidden transition-all duration-300 ${isDragging ? 'border-cyan-400/50 ring-2 ring-cyan-400/50' : ''}`}
+      className={`flex-grow bg-black/30 backdrop-blur-sm rounded-xl border border-gray-500/20 relative overflow-y-auto custom-scrollbar transition-all duration-300 ${isDragging ? 'border-cyan-400/50 ring-2 ring-cyan-400/50' : ''}`}
       style={{
         backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(100, 100, 100, 0.3) 1px, transparent 0)',
         backgroundSize: '20px 20px',
+        minHeight: 0 // Ensure flex child allows scrolling
       }}
     >
-      <div className="absolute inset-0 bg-gradient-to-br from-transparent to-black/30 pointer-events-none"></div>
-      
-      <div className="relative w-full h-full flex flex-col justify-start z-0">
-        {/* Qubit Lines */}
-        {[...Array(numQubits)].map((_, i) => (
-           <div
-            key={`qubit-${i}`}
-            className="relative flex items-center group cursor-pointer"
-            style={{ height: `${QUBIT_LINE_HEIGHT}px` }}
-            onClick={() => setVisualizedQubit(i)}
-            >
-            <span className={`absolute -left-12 font-mono text-sm select-none transition-colors ${visualizedQubit === i ? 'text-cyan-400' : 'text-gray-500'}`}>
-                q[{i}]
-            </span>
-            <div className={`w-full h-px transition-all duration-300 ${visualizedQubit === i ? 'bg-cyan-400 scale-y-150' : 'bg-cyan-400/50 group-hover:bg-cyan-400/80'}`}></div>
-            {visualizedQubit === i && (
-                <motion.div
-                layoutId="qubit-selection"
-                className="absolute -inset-x-2 -inset-y-4 bg-cyan-500/10 rounded-lg pointer-events-none"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{duration: 0.2}}
+      {/* Padded Inner Container to ensure content isn't cut off */}
+      <div className="relative min-w-full min-h-full p-8 pb-20"> 
+          <div className="absolute inset-0 bg-gradient-to-br from-transparent to-black/30 pointer-events-none z-0"></div>
+          
+          <div className="relative w-full flex flex-col justify-start z-10">
+            {/* Qubit Lines */}
+            {[...Array(numQubits)].map((_, i) => (
+               <div
+                key={`qubit-${i}`}
+                className="relative flex items-center group cursor-pointer"
+                style={{ height: `${QUBIT_LINE_HEIGHT}px` }}
+                onClick={() => setVisualizedQubit(i)}
+                >
+                <span className={`absolute -left-12 font-mono text-sm select-none transition-colors ${visualizedQubit === i ? 'text-cyan-400' : 'text-gray-500'}`}>
+                    q[{i}]
+                </span>
+                <div className={`w-full h-px transition-all duration-300 ${visualizedQubit === i ? 'bg-cyan-400 scale-y-150' : 'bg-cyan-400/50 group-hover:bg-cyan-400/80'}`}></div>
+                {visualizedQubit === i && (
+                    <motion.div
+                    layoutId="qubit-selection"
+                    className="absolute -inset-x-2 -inset-y-4 bg-cyan-500/10 rounded-lg pointer-events-none"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{duration: 0.2}}
+                    />
+                )}
+                </div>
+            ))}
+            
+            {/* Keyboard Navigation Cursor */}
+            <AnimatePresence>
+                {cursorPosition && (
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                        className="absolute z-20 pointer-events-none border-2 border-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.5)] rounded-lg"
+                        style={{
+                            top: cursorPosition.qubit * QUBIT_LINE_HEIGHT + 12, // Centered roughly on line
+                            left: `${cursorPosition.gridIndex * 10}%`,
+                            width: '10%',
+                            height: '40px',
+                        }}
+                    />
+                )}
+            </AnimatePresence>
+            
+            {/* Quick Add Menu */}
+            {isQuickAddOpen && cursorPosition && (
+                <QuickAddMenu
+                    isOpen={isQuickAddOpen}
+                    position={{ 
+                        top: cursorPosition.qubit * QUBIT_LINE_HEIGHT + 40,
+                        left: `${cursorPosition.gridIndex * 10}%` 
+                    }}
+                    onClose={onCloseQuickAdd}
+                    onSelectGate={onQuickAddSelect}
                 />
             )}
-            </div>
-        ))}
-        
-        {/* Keyboard Navigation Cursor */}
-        <AnimatePresence>
-            {cursorPosition && (
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.8 }}
-                    className="absolute z-20 pointer-events-none border-2 border-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.5)] rounded-lg"
+
+            {/* Simulation Step Indicator */}
+            <AnimatePresence>
+                {simulationStep !== null && simulationStep > 0 && (
+                    <motion.div
+                        className="absolute top-0 h-full w-0.5 bg-purple-400 z-20"
+                        initial={{ scaleY: 0 }}
+                        animate={{ scaleY: 1 }}
+                        exit={{ scaleY: 0 }}
+                        style={{
+                            left: `calc(${sortedItems[simulationStep - 1].left}%)`,
+                            height: `${numQubits * QUBIT_LINE_HEIGHT}px`
+                        }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                    />
+                )}
+            </AnimatePresence>
+            
+            {/* Drag Selection Rectangle */}
+            {selectionRect && (
+                <div
+                    className="absolute bg-cyan-400/20 border border-cyan-400/50 z-50 pointer-events-none"
                     style={{
-                        top: cursorPosition.qubit * QUBIT_LINE_HEIGHT + 12, // Centered roughly on line
-                        left: `${cursorPosition.gridIndex * 10}%`,
-                        width: '10%',
-                        height: '40px',
+                        left: selectionRect.x,
+                        top: selectionRect.y,
+                        width: selectionRect.w,
+                        height: selectionRect.h,
                     }}
                 />
             )}
-        </AnimatePresence>
-        
-        {/* Quick Add Menu */}
-        {isQuickAddOpen && cursorPosition && (
-            <QuickAddMenu
-                isOpen={isQuickAddOpen}
-                position={{ 
-                    top: cursorPosition.qubit * QUBIT_LINE_HEIGHT + 40,
-                    left: `${cursorPosition.gridIndex * 10}%` 
-                }}
-                onClose={onCloseQuickAdd}
-                onSelectGate={onQuickAddSelect}
-            />
-        )}
-
-        {/* Simulation Step Indicator */}
-        <AnimatePresence>
-            {simulationStep !== null && simulationStep > 0 && (
-                <motion.div
-                    className="absolute top-0 h-full w-0.5 bg-purple-400 z-20"
-                    initial={{ scaleY: 0 }}
-                    animate={{ scaleY: 1 }}
-                    exit={{ scaleY: 0 }}
-                    style={{
-                        left: `calc(${sortedItems[simulationStep - 1].left}%)`,
-                        height: `${numQubits * QUBIT_LINE_HEIGHT}px`
-                    }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                />
-            )}
-        </AnimatePresence>
-        
-        {/* Drag Selection Rectangle */}
-        {selectionRect && (
-            <div
-                className="absolute bg-cyan-400/20 border border-cyan-400/50 z-50 pointer-events-none"
-                style={{
-                    left: selectionRect.x,
-                    top: selectionRect.y,
-                    width: selectionRect.w,
-                    height: selectionRect.h,
-                }}
-            />
-        )}
 
 
-        {/* Placed Items */}
-        <AnimatePresence>
-        {placedItems.map(item => {
-          const isSelected = selectedItemIds.includes(item.instanceId);
+            {/* Placed Items */}
+            <AnimatePresence>
+            {placedItems.map(item => {
+              const isSelected = selectedItemIds.includes(item.instanceId);
 
-          if ('gateId' in item) {
-              const placedGate = item;
-              const gateInfo = gateMap.get(placedGate.gateId);
-              if (!gateInfo) return null;
+              if ('gateId' in item) {
+                  const placedGate = item;
+                  const gateInfo = gateMap.get(placedGate.gateId);
+                  if (!gateInfo) return null;
 
-              const Icon = gateInfo.icon;
-              const top = (placedGate.qubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
+                  const Icon = gateInfo.icon;
+                  const top = (placedGate.qubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
 
-              if (gateInfo.type === 'control' && placedGate.controlQubit !== undefined) {
-                const controlY = (placedGate.controlQubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
-                
-                const containerTop = Math.min(top, controlY) - (GATE_HEIGHT / 2);
-                const containerHeight = Math.abs(top - controlY) + GATE_HEIGHT;
-                
-                const isControlTop = controlY < top;
+                  if (gateInfo.type === 'control' && placedGate.controlQubit !== undefined) {
+                    const controlY = (placedGate.controlQubit * QUBIT_LINE_HEIGHT) + (QUBIT_LINE_HEIGHT / 2);
+                    
+                    const containerTop = Math.min(top, controlY) - (GATE_HEIGHT / 2);
+                    const containerHeight = Math.abs(top - controlY) + GATE_HEIGHT;
+                    
+                    const isControlTop = controlY < top;
 
-                const targetTop = isControlTop ? (containerHeight - GATE_HEIGHT) : 0;
-                const controlTop = isControlTop ? 0 : (containerHeight - GATE_HEIGHT);
+                    const targetTop = isControlTop ? (containerHeight - GATE_HEIGHT) : 0;
+                    const controlTop = isControlTop ? 0 : (containerHeight - GATE_HEIGHT);
 
-                if (placedGate.gateId === 'swap') {
-                    return (
-                         <motion.div
-                            key={placedGate.instanceId}
-                            layout
-                            initial={{ opacity: 0, scale: 0.5 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.5 }}
-                            className="absolute z-10 cursor-pointer"
-                            style={{
-                                left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
-                                top: `${containerTop}px`,
-                                width: `${GATE_WIDTH}px`,
-                                height: `${containerHeight}px`,
-                            }}
-                            onClick={(e) => handleItemClick(e, placedGate.instanceId)}
-                        >
-                             <div className="relative w-full h-full hover:bg-cyan-500/10 rounded-lg transition-colors">
-                                <div
-                                    className="absolute bg-blue-400"
-                                    style={{
-                                        left: `calc(50% - 1px)`,
-                                        top: `${GATE_HEIGHT / 2}px`,
-                                        height: `${containerHeight - GATE_HEIGHT}px`,
-                                        width: '2px',
-                                    }}
-                                />
-                                 <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: targetTop + GATE_HEIGHT/2 - 12, width: '24px', height: '24px'}}>
-                                    <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
-                                </div>
-                                <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: controlTop + GATE_HEIGHT/2 - 12, width: '24px', height: '24px'}}>
-                                    <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
-                                </div>
-                                {isSelected && (
-                                    <motion.div
-                                        className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
-                                        layoutId={`selectionRing-${placedGate.instanceId}`}
+                    if (placedGate.gateId === 'swap') {
+                        return (
+                             <motion.div
+                                key={placedGate.instanceId}
+                                layout
+                                initial={{ opacity: 0, scale: 0.5 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.5 }}
+                                className="absolute z-10 cursor-pointer"
+                                style={{
+                                    left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
+                                    top: `${containerTop}px`,
+                                    width: `${GATE_WIDTH}px`,
+                                    height: `${containerHeight}px`,
+                                }}
+                                onClick={(e) => handleItemClick(e, placedGate.instanceId)}
+                            >
+                                 <div className="relative w-full h-full hover:bg-cyan-500/10 rounded-lg transition-colors">
+                                    <div
+                                        className="absolute bg-blue-400"
+                                        style={{
+                                            left: `calc(50% - 1px)`,
+                                            top: `${GATE_HEIGHT / 2}px`,
+                                            height: `${containerHeight - GATE_HEIGHT}px`,
+                                            width: '2px',
+                                        }}
                                     />
-                                )}
+                                     <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: targetTop + GATE_HEIGHT/2 - 12, width: '24px', height: '24px'}}>
+                                        <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
+                                    </div>
+                                    <div className="absolute flex items-center justify-center" style={{ left: `calc(50% - 12px)`, top: controlTop + GATE_HEIGHT/2 - 12, width: '24px', height: '24px'}}>
+                                        <SwapTargetIcon className="w-5 h-5 text-blue-400"/>
+                                    </div>
+                                    {isSelected && (
+                                        <motion.div
+                                            className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
+                                            layoutId={`selectionRing-${placedGate.instanceId}`}
+                                        />
+                                    )}
+                                </div>
+                            </motion.div>
+                        )
+                    }
+
+
+                    return (
+                        <motion.div
+                          key={placedGate.instanceId}
+                          layout
+                          initial={{ opacity: 0, scale: 0.5 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.5 }}
+                          className="absolute z-10 cursor-pointer"
+                          style={{
+                            left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
+                            top: `${containerTop}px`,
+                            width: `${GATE_WIDTH}px`,
+                            height: `${containerHeight}px`,
+                          }}
+                          onClick={(e) => handleItemClick(e, placedGate.instanceId)}
+                        >
+                          <div className="relative w-full h-full hover:bg-cyan-500/10 rounded-lg transition-colors">
+                            <div
+                              className="absolute bg-blue-400"
+                              style={{
+                                left: `calc(50% - 1px)`,
+                                top: `${GATE_HEIGHT / 2}px`,
+                                height: `${containerHeight - GATE_HEIGHT}px`,
+                                width: '2px',
+                              }}
+                            />
+                            <div
+                              className="absolute w-3 h-3 bg-blue-400 rounded-full"
+                              style={{
+                                left: `calc(50% - 6px)`,
+                                top: controlTop + GATE_HEIGHT/2 - 6
+                              }}
+                            />
+                            <div
+                              className="absolute flex items-center justify-center"
+                              style={{
+                                width: `${GATE_WIDTH}px`,
+                                height: `${GATE_HEIGHT}px`,
+                                left: 0,
+                                top: targetTop,
+                              }}
+                            >
+                              {placedGate.gateId === 'cnot' ? <CNOTGateIcon className="w-8 h-8 text-blue-400"/> : <div className="w-3 h-3 bg-blue-400 rounded-full" />}
                             </div>
+                            {isSelected && (
+                              <motion.div
+                                  className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
+                                  layoutId={`selectionRing-${placedGate.instanceId}`}
+                                />
+                            )}
+                          </div>
                         </motion.div>
                     )
-                }
+                  }
 
-
-                return (
+                  return (
                     <motion.div
                       key={placedGate.instanceId}
                       layout
@@ -403,138 +459,84 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                       exit={{ opacity: 0, scale: 0.5 }}
                       className="absolute z-10 cursor-pointer"
                       style={{
-                        left: `calc(${placedGate.left}% - ${GATE_WIDTH / 2}px)`,
-                        top: `${containerTop}px`,
-                        width: `${GATE_WIDTH}px`,
-                        height: `${containerHeight}px`,
+                        left: `calc(${placedGate.left}% - 20px)`,
+                        top: `${top - 20}px`,
                       }}
                       onClick={(e) => handleItemClick(e, placedGate.instanceId)}
                     >
-                      <div className="relative w-full h-full hover:bg-cyan-500/10 rounded-lg transition-colors">
-                        <div
-                          className="absolute bg-blue-400"
-                          style={{
-                            left: `calc(50% - 1px)`,
-                            top: `${GATE_HEIGHT / 2}px`,
-                            height: `${containerHeight - GATE_HEIGHT}px`,
-                            width: '2px',
-                          }}
-                        />
-                        <div
-                          className="absolute w-3 h-3 bg-blue-400 rounded-full"
-                          style={{
-                            left: `calc(50% - 6px)`,
-                            top: controlTop + GATE_HEIGHT/2 - 6
-                          }}
-                        />
-                        <div
-                          className="absolute flex items-center justify-center"
-                          style={{
-                            width: `${GATE_WIDTH}px`,
-                            height: `${GATE_HEIGHT}px`,
-                            left: 0,
-                            top: targetTop,
-                          }}
-                        >
-                          {placedGate.gateId === 'cnot' ? <CNOTGateIcon className="w-8 h-8 text-blue-400"/> : <div className="w-3 h-3 bg-blue-400 rounded-full" />}
-                        </div>
+                      <div className={`relative flex items-center justify-center w-10 h-10 bg-gray-900/80 backdrop-blur-sm border rounded-lg ${gateInfo.color} border-current`}>
+                        <Icon className="w-6 h-6" />
                         {isSelected && (
-                          <motion.div
+                           <motion.div
                               className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
                               layoutId={`selectionRing-${placedGate.instanceId}`}
                             />
                         )}
                       </div>
+                      {/* Param Label for Visualization */}
+                      {placedGate.params && placedGate.params.theta && (
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 text-[10px] font-mono text-gray-400 bg-black/50 px-1 rounded mt-1 whitespace-nowrap">
+                              {placedGate.params.theta}
+                          </div>
+                      )}
                     </motion.div>
-                )
-              }
+                  )
+              } else if ('customGateId' in item) {
+                  const placedCustomGate = item;
+                  const def = customGateDefs.find(d => d.id === placedCustomGate.customGateId);
+                  if (!def) return null;
+                  
+                  const maxRelativeQubit = Math.max(...def.gates.map(g => g.controlQubit ?? g.qubit), ...def.gates.map(g => g.qubit));
+                  const height = (maxRelativeQubit + 1) * QUBIT_LINE_HEIGHT;
+                  const top = placedCustomGate.qubit * QUBIT_LINE_HEIGHT;
 
-              return (
-                <motion.div
-                  key={placedGate.instanceId}
-                  layout
-                  initial={{ opacity: 0, scale: 0.5 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.5 }}
-                  className="absolute z-10 cursor-pointer"
-                  style={{
-                    left: `calc(${placedGate.left}% - 20px)`,
-                    top: `${top - 20}px`,
-                  }}
-                  onClick={(e) => handleItemClick(e, placedGate.instanceId)}
-                >
-                  <div className={`relative flex items-center justify-center w-10 h-10 bg-gray-900/80 backdrop-blur-sm border rounded-lg ${gateInfo.color} border-current`}>
-                    <Icon className="w-6 h-6" />
-                    {isSelected && (
+                  return (
                        <motion.div
-                          className="absolute -inset-1.5 rounded-lg border-2 border-cyan-400"
-                          layoutId={`selectionRing-${placedGate.instanceId}`}
-                        />
-                    )}
-                  </div>
-                  {/* Param Label for Visualization */}
-                  {placedGate.params && placedGate.params.theta && (
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 text-[10px] font-mono text-gray-400 bg-black/50 px-1 rounded mt-1 whitespace-nowrap">
-                          {placedGate.params.theta}
-                      </div>
-                  )}
-                </motion.div>
-              )
-          } else if ('customGateId' in item) {
-              const placedCustomGate = item;
-              const def = customGateDefs.find(d => d.id === placedCustomGate.customGateId);
-              if (!def) return null;
-              
-              const maxRelativeQubit = Math.max(...def.gates.map(g => g.controlQubit ?? g.qubit), ...def.gates.map(g => g.qubit));
-              const height = (maxRelativeQubit + 1) * QUBIT_LINE_HEIGHT;
-              const top = placedCustomGate.qubit * QUBIT_LINE_HEIGHT;
-
-              return (
-                   <motion.div
-                      key={placedCustomGate.instanceId}
-                      layout
-                      initial={{ opacity: 0, scale: 0.5 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.5 }}
-                      className="absolute z-10 cursor-pointer"
-                      style={{
-                        left: `calc(${placedCustomGate.left}% - 40px)`,
-                        top: `${top}px`,
-                        width: '80px',
-                        height: `${height}px`,
-                      }}
-                      onClick={(e) => handleItemClick(e, placedCustomGate.instanceId)}
-                    >
-                        <div className={`relative flex items-center justify-center w-full h-full bg-gray-800/80 backdrop-blur-sm border-2 rounded-lg ${def.color} border-current`}>
-                            <span className="text-xs font-mono font-semibold tracking-wider">{def.name}</span>
-                            {isSelected && (
-                            <motion.div
-                                className="absolute -inset-2 rounded-lg border-2 border-cyan-400"
-                                layoutId={`selectionRing-${placedCustomGate.instanceId}`}
-                                />
-                            )}
-                        </div>
-                    </motion.div>
-              )
-          }
-        })}
-        </AnimatePresence>
+                          key={placedCustomGate.instanceId}
+                          layout
+                          initial={{ opacity: 0, scale: 0.5 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.5 }}
+                          className="absolute z-10 cursor-pointer"
+                          style={{
+                            left: `calc(${placedCustomGate.left}% - 40px)`,
+                            top: `${top}px`,
+                            width: '80px',
+                            height: `${height}px`,
+                          }}
+                          onClick={(e) => handleItemClick(e, placedCustomGate.instanceId)}
+                        >
+                            <div className={`relative flex items-center justify-center w-full h-full bg-gray-800/80 backdrop-blur-sm border-2 rounded-lg ${def.color} border-current`}>
+                                <span className="text-xs font-mono font-semibold tracking-wider">{def.name}</span>
+                                {isSelected && (
+                                <motion.div
+                                    className="absolute -inset-2 rounded-lg border-2 border-cyan-400"
+                                    layoutId={`selectionRing-${placedCustomGate.instanceId}`}
+                                    />
+                                )}
+                            </div>
+                        </motion.div>
+                  )
+              }
+            })}
+            </AnimatePresence>
+          </div>
       </div>
       
-      <div className="absolute top-2 left-4 flex items-center gap-2 z-20">
-         <div className="flex items-center gap-2 bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md">
+      <div className="absolute top-2 left-4 flex items-center gap-2 z-20 sticky">
+         <div className="flex items-center gap-2 bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md backdrop-blur-md border border-gray-600/30">
             <span className="text-xs font-mono">Qubits:</span>
             <button onClick={() => onNumQubitsChange(numQubits - 1)} disabled={numQubits <= 2} className="disabled:opacity-30 enabled:hover:text-white transition-colors">
                 <MinusIcon className="w-3.5 h-3.5" />
             </button>
-            <span className="font-mono font-semibold text-base text-gray-200 w-4 text-center">{numQubits}</span>
-            <button onClick={() => onNumQubitsChange(numQubits + 1)} disabled={numQubits >= 5} className="disabled:opacity-30 enabled:hover:text-white transition-colors">
+            <span className="font-mono font-semibold text-base text-gray-200 min-w-[20px] text-center">{numQubits}</span>
+            <button onClick={() => onNumQubitsChange(numQubits + 1)} disabled={numQubits >= 127} className="disabled:opacity-30 enabled:hover:text-white transition-colors">
                  <PlusIcon className="w-3.5 h-3.5" />
             </button>
         </div>
       </div>
       
-      <div className="absolute top-2 right-4 flex items-center gap-2 z-20">
+      <div className="absolute top-2 right-4 flex items-center gap-2 z-20 sticky">
          <AnimatePresence>
           {selectedItem && 'gateId' in selectedItem && (
             <>
@@ -544,7 +546,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.9 }}
-                    className="flex items-center gap-2 bg-gray-800 border border-gray-600 rounded-md px-2 py-1"
+                    className="flex items-center gap-2 bg-gray-800 border border-gray-600 rounded-md px-2 py-1 backdrop-blur-md"
                 >
                     <span className="text-xs font-mono text-pink-400">θ:</span>
                     <input 
@@ -561,7 +563,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
               animate={{ opacity: 1, width: 'auto' }}
               exit={{ opacity: 0, width: 0 }}
               onClick={() => onExplainGate(selectedItem.gateId)}
-              className="group flex items-center gap-2 text-xs font-mono bg-purple-500/20 text-purple-300 px-3 py-1.5 rounded-md hover:bg-purple-500/30 hover:text-purple-200 transition-all overflow-hidden whitespace-nowrap"
+              className="group flex items-center gap-2 text-xs font-mono bg-purple-500/20 text-purple-300 px-3 py-1.5 rounded-md hover:bg-purple-500/30 hover:text-purple-200 transition-all overflow-hidden whitespace-nowrap backdrop-blur-md border border-purple-500/30"
             >
               <ExplanationAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity flex-shrink-0" />
               <span className="flex-shrink-0">Explain Gate</span>
@@ -574,7 +576,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                   animate={{ opacity: 1, width: 'auto' }}
                   exit={{ opacity: 0, width: 0 }}
                   onClick={onGroupSelection}
-                  className="group flex items-center gap-2 text-xs font-mono bg-orange-500/20 text-orange-300 px-3 py-1.5 rounded-md hover:bg-orange-500/30 hover:text-orange-200 transition-all overflow-hidden whitespace-nowrap"
+                  className="group flex items-center gap-2 text-xs font-mono bg-orange-500/20 text-orange-300 px-3 py-1.5 rounded-md hover:bg-orange-500/30 hover:text-orange-200 transition-all overflow-hidden whitespace-nowrap backdrop-blur-md border border-orange-500/30"
                 >
                   <GroupIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                   <span className="flex-shrink-0">Group</span>
@@ -583,7 +585,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
         </AnimatePresence>
          <button 
           onClick={onClear}
-          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-red-500/20 hover:text-red-300 transition-all"
+          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-red-500/20 hover:text-red-300 transition-all backdrop-blur-md border border-gray-600/30"
           title="Clear Circuit"
         >
           <TrashIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
@@ -591,28 +593,28 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
         </button>
         <button 
           onClick={onDebugCircuit}
-          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-yellow-500/20 hover:text-yellow-300 transition-all"
+          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-yellow-500/20 hover:text-yellow-300 transition-all backdrop-blur-md border border-gray-600/30"
         >
           <DebuggerAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
           Debug Circuit
         </button>
         <button 
           onClick={onOptimizeCircuit}
-          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-green-500/20 hover:text-green-300 transition-all"
+          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-green-500/20 hover:text-green-300 transition-all backdrop-blur-md border border-gray-600/30"
         >
           <OptimizerAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
           Optimize Circuit
         </button>
         <button 
           onClick={onAnalyzeCircuit}
-          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-cyan-500/20 hover:text-cyan-300 transition-all"
+          className="group flex items-center gap-2 text-xs font-mono bg-gray-700/50 text-gray-400 px-3 py-1.5 rounded-md hover:bg-cyan-500/20 hover:text-cyan-300 transition-all backdrop-blur-md border border-gray-600/30"
         >
           <ResearchAgentIcon className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
           Analyze Circuit
         </button>
       </div>
 
-       <div className="absolute bottom-4 left-4 text-xs text-gray-600 font-['IBM_Plex_Mono'] z-10 pointer-events-none">
+       <div className="absolute bottom-4 left-4 text-xs text-gray-600 font-['IBM_Plex_Mono'] z-20 pointer-events-none sticky">
          <span className="text-cyan-500 font-semibold">Tips:</span> Use <kbd className="px-1.5 py-0.5 border border-gray-700 rounded-md bg-gray-800">Arrow Keys</kbd> to navigate. Drag to Select.
       </div>
 
@@ -622,7 +624,7 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: 20, opacity: 0 }}
-                className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-gray-900/80 backdrop-blur-sm border border-gray-500/30 rounded-lg p-2 font-mono text-xs z-30"
+                className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-gray-900/80 backdrop-blur-sm border border-gray-500/30 rounded-lg p-2 font-mono text-xs z-30 sticky"
             >
                 <button onClick={() => handleStepChange(-1)} disabled={simulationStep === 0} className="px-2 py-1 rounded hover:bg-gray-700 disabled:opacity-30">Back</button>
                 <span>Step {simulationStep} of {sortedItems.length}</span>
@@ -636,9 +638,9 @@ const CircuitCanvas = forwardRef<HTMLDivElement, CircuitCanvasProps>(({
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: 20, opacity: 0 }}
-                className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30"
+                className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 sticky"
             >
-                <button onClick={() => setSimulationStep(0)} className="flex items-center gap-2 text-xs font-mono bg-purple-500/20 text-purple-300 px-3 py-1.5 rounded-md hover:bg-purple-500/30 hover:text-purple-200 transition-all">
+                <button onClick={() => setSimulationStep(0)} className="flex items-center gap-2 text-xs font-mono bg-purple-500/20 text-purple-300 px-3 py-1.5 rounded-md hover:bg-purple-500/30 hover:text-purple-200 transition-all backdrop-blur-md border border-purple-500/30">
                     <PlayIcon className="w-3 h-3"/>
                     Step-Through Simulation
                 </button>

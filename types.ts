@@ -57,7 +57,7 @@ export interface AgentStatusUpdate {
 }
 
 // AI Communication Protocol
-export type AddGatePayload = Omit<PlacedGate, 'instanceId' | 'isSelected'>;
+export type AddGatePayload = Omit<PlacedGate, 'instanceId' | 'isSelected'> & { qubits?: number[] };
 export type ReplaceCircuitPayload = AddGatePayload[];
 
 export type AIAction = 

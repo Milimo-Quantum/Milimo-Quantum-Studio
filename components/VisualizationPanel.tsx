@@ -1,9 +1,11 @@
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, useSpring, useTransform, AnimatePresence } from 'framer-motion';
 import type { SimulationResult } from '../types';
 import LogoIcon from './icons/LogoIcon';
 import NoiseIcon from './icons/NoiseIcon';
 import InfoIcon from './icons/InfoIcon';
+import ChipIcon from './icons/ChipIcon';
 
 const SPHERE_SIZE = 220;
 const RADIUS = SPHERE_SIZE / 2;
@@ -305,8 +307,11 @@ interface VisualizationPanelProps {
   isHardwareRunning: boolean;
 }
 
-const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visualizedQubit, depolarizingError, setDepolarizingError, phaseDampingError, setPhaseDampingError, hardwareResult, isHardwareRunning }) => {
+const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visualizedQubit, numQubits, depolarizingError, setDepolarizingError, phaseDampingError, setPhaseDampingError, hardwareResult, isHardwareRunning }) => {
   const [isNoisePanelOpen, setIsNoisePanelOpen] = useState(false);
+  
+  // Check for "High Performance Mode" (Too many qubits for live browser simulation)
+  const isThrottled = numQubits > 15;
   const hasResult = result && result.probabilities.length > 0;
 
   const visualizedQubitState = useMemo(() => {
@@ -314,6 +319,37 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
     return result.qubitStates[visualizedQubit];
   }, [result, visualizedQubit, hasResult]);
   
+  // If we are throttled and no hardware result is present, show the performance warning
+  if (isThrottled && !hardwareResult && !isHardwareRunning) {
+      return (
+        <motion.div
+            key="visualization-throttled"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 font-['IBM_Plex_Mono']"
+        >
+            <div className="w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center mb-4 border border-yellow-500/30">
+                <ChipIcon className="w-8 h-8 text-yellow-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-yellow-400 font-['Space_Grotesk'] mb-2">High Performance Mode</h3>
+            <p className="text-sm text-gray-400 max-w-xs mb-6">
+                Your circuit ({numQubits} qubits) is too large for live browser simulation.
+            </p>
+            <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700 text-left space-y-3 max-w-sm">
+                <div className="flex items-start gap-3">
+                    <div className="mt-1 w-1.5 h-1.5 rounded-full bg-cyan-400 flex-shrink-0" />
+                    <p className="text-xs text-gray-300">Use the <strong>Hardware</strong> tab to run this circuit on a cloud simulator or real quantum processor.</p>
+                </div>
+                <div className="flex items-start gap-3">
+                    <div className="mt-1 w-1.5 h-1.5 rounded-full bg-purple-400 flex-shrink-0" />
+                    <p className="text-xs text-gray-300">Use the <strong>Code</strong> tab to export to Qiskit or Cirq.</p>
+                </div>
+            </div>
+        </motion.div>
+      );
+  }
+
   return (
     <motion.div
       key="visualization"
@@ -321,9 +357,9 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
       transition={{ duration: 0.3 }}
-      className="absolute inset-0 overflow-y-auto flex flex-col gap-6 text-sm text-gray-300 font-['IBM_Plex_Mono']"
+      className="absolute inset-0 overflow-y-auto flex flex-col gap-6 text-sm text-gray-300 font-['IBM_Plex_Mono'] custom-scrollbar"
     >
-      {!hasResult ? (
+      {!hasResult && !isHardwareRunning && !hardwareResult ? (
         <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
             <LogoIcon className="w-16 h-16 text-gray-700 mb-4" />
             <h3 className="text-lg font-semibold text-gray-400 font-['Space_Grotesk']">No Simulation Data</h3>
@@ -331,6 +367,8 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
         </div>
       ) : (
         <>
+            {/* Only show Bloch sphere if we have a valid local simulation result (meaning < 15 qubits) */}
+            {hasResult && (
             <div>
                 <div className="flex justify-between items-end mb-2">
                     <h3 className="text-gray-400">Bloch Sphere (q[{visualizedQubit}])</h3>
@@ -353,7 +391,9 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
                 </div>
                 <p className="text-center text-xs text-gray-500 mt-2">The vector traces its path when gates change.</p>
             </div>
+            )}
 
+            {!isThrottled && (
             <div>
                  <button onClick={() => setIsNoisePanelOpen(p => !p)} className="w-full flex justify-between items-center text-gray-400 mb-3 group hover:text-white transition-colors">
                     <div className="flex items-center gap-2">
@@ -388,12 +428,17 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
                  )}
                  </AnimatePresence>
             </div>
+            )}
 
              <div>
                 <h3 className="text-gray-400 mb-3">Measurement Probabilities</h3>
                 <div className="border border-gray-500/20 rounded-lg p-4 bg-black/20">
-                    <h4 className="text-xs text-cyan-300 mb-3 uppercase tracking-wider">Ideal Simulation</h4>
-                    <ProbabilityBars probabilities={result.probabilities} />
+                    {hasResult && (
+                        <>
+                        <h4 className="text-xs text-cyan-300 mb-3 uppercase tracking-wider">Ideal Simulation</h4>
+                        <ProbabilityBars probabilities={result.probabilities} />
+                        </>
+                    )}
 
                     <AnimatePresence>
                     {(isHardwareRunning || hardwareResult) && (
@@ -401,9 +446,9 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className="mt-4"
+                            className={hasResult ? "mt-4" : ""}
                         >
-                            <div className="h-px bg-gray-700/50 my-4"></div>
+                            {hasResult && <div className="h-px bg-gray-700/50 my-4"></div>}
                             <h4 className="text-xs text-purple-300 mb-3 uppercase tracking-wider">Hardware Run Results</h4>
                             {isHardwareRunning && !hardwareResult && (
                                 <div className="flex items-center justify-center h-24 text-gray-500">
@@ -411,7 +456,7 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ result, visuali
                                         <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.3s]"></span>
                                         <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.15s]"></span>
                                         <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse"></span>
-                                        <span className="ml-2 text-xs">Running on noisy backend...</span>
+                                        <span className="ml-2 text-xs">Running on backend...</span>
                                     </div>
                                 </div>
                             )}

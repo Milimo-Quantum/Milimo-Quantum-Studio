@@ -19,12 +19,13 @@ const addGateTool: FunctionDeclaration = {
         type: Type.OBJECT, 
         properties: { 
             gateId: { type: Type.STRING, enum: gateIds }, 
-            qubit: { type: Type.INTEGER }, 
+            qubit: { type: Type.INTEGER, description: "Single target qubit index." }, 
+            qubits: { type: Type.ARRAY, items: { type: Type.INTEGER }, description: "Array of target qubit indices. Use this to add the same gate (e.g. 'h', 'measure', 'rx') to multiple qubits at the same position simultaneously." },
             controlQubit: { type: Type.INTEGER }, 
             left: { type: Type.NUMBER },
             params: { type: Type.OBJECT, properties: { theta: { type: Type.STRING } }, description: "Parameters for the gate (e.g. {theta: 'pi/2'} for RX/RY/RZ)" }
         }, 
-        required: ['gateId', 'qubit', 'left'] 
+        required: ['gateId', 'left'] 
     } 
 };
 
@@ -40,11 +41,12 @@ const replaceCircuitTool: FunctionDeclaration = {
                     properties: { 
                         gateId: { type: Type.STRING, enum: gateIds }, 
                         qubit: { type: Type.INTEGER }, 
+                        qubits: { type: Type.ARRAY, items: { type: Type.INTEGER } },
                         controlQubit: { type: Type.INTEGER }, 
                         left: { type: Type.NUMBER },
                         params: { type: Type.OBJECT, properties: { theta: { type: Type.STRING } } }
                     }, 
-                    required: ['gateId', 'qubit', 'left'] 
+                    required: ['gateId', 'left'] 
                 } 
             } 
         }, 
@@ -55,8 +57,8 @@ const replaceCircuitTool: FunctionDeclaration = {
 const getSimulationResultsTool: FunctionDeclaration = { name: 'get_simulation_results', parameters: { type: Type.OBJECT, properties: {} } };
 const setQubitCountTool: FunctionDeclaration = { 
   name: 'set_qubit_count', 
-  description: "Sets the number of qubits on the canvas. Must be between 2 and 5. **Warning:** This action will clear all existing gates from the circuit.",
-  parameters: { type: Type.OBJECT, properties: { qubit_count: { type: Type.INTEGER, description: "The desired number of qubits." } }, required: ['qubit_count'] } 
+  description: "Sets the number of qubits on the canvas. Must be between 2 and 127. **Warning:** This action will clear all existing gates from the circuit.",
+  parameters: { type: Type.OBJECT, properties: { qubit_count: { type: Type.INTEGER, description: "The desired number of qubits (2-127)." } }, required: ['qubit_count'] } 
 };
 const designTools = [addGateTool, replaceCircuitTool, getSimulationResultsTool, setQubitCountTool];
 
@@ -97,6 +99,7 @@ ${environmentCapabilities}
     - **Simple Command:** If the user gives a direct, simple command like "add a Hadamard to qubit 0", create a single-step "Design" agent plan. The prompt for the Design agent should be the user's exact command for fast, conversational building.
     - **Analyze/Debug/Optimize:** If the user asks to "analyze", "debug", or "optimize" the current circuit, create a single-step plan for the corresponding agent.
     - **Hardware/Export Requests:** If the user asks to run on hardware (e.g., "Run on Sycamore") or export code, you can respond directly (single step Design or Explanation) or guide them. Ideally, instruct the **Design** or **Explanation** agent to inform the user about the "Hardware" or "Code" tabs in the final response.
+    - **Large Circuits (SOTA):** We now support up to **127 qubits**. If a user asks for a 10, 50, or 100 qubit circuit (e.g., for QAOA or specific hardware layouts), YOU CAN APPROVE IT. Do not limit them to 5. However, instruct the Design Agent that for >15 qubits, live simulation will be disabled, so they should recommend the "Hardware" tab for execution.
 2.  **Formulate the Plan:** Your output MUST be a single JSON object inside a markdown code block. The JSON object must contain a "plan" array. Do not output any other text.
 
 **Example: Simple Command**
@@ -138,7 +141,7 @@ ${sotaConceptsLibrary}
 **Core Directives:**
 1.  **Assess Alignment & Advancement:** Does the research finding truly address the user's request, especially regarding specified complexity? If the user asks for a 'more complex' or 'advanced' solution, you MUST REJECT any proposal for a standard, foundational circuit like a GHZ state or the 3-qubit bit-flip code. Your reasoning must state that the solution is too basic.
 2.  **Evaluate Implementation Elegance:** When creating the \`refined_prompt\`, you MUST consider if there is a more direct or elegant way to build the circuit using the full range of available gates. For example, instead of a complex combination of CNOTs and Hadamards to create a Controlled-Z, you MUST instruct the agent to use the 'cz' gate directly.
-3.  **Manage Canvas Resources:** If the best-researched option requires a different number of qubits, your 'refined_prompt' for the Design Agent MUST begin with the instruction to change the qubit count using the 'set_qubit_count' tool.
+3.  **Manage Canvas Resources:** If the best-researched option requires a different number of qubits, your 'refined_prompt' for the Design Agent MUST begin with the instruction to change the qubit count using the 'set_qubit_count' tool. We support up to 127 qubits.
 4.  **Provide Actionable Feedback:** Your output MUST be a JSON object.
     - If you approve, it must contain \`is_approved: true\`, \`reasoning\`, and a \`refined_prompt\` for the Design Agent.
     - If you reject, it must contain \`is_approved: false\`, \`reasoning\`, and a \`rejection_prompt\` that tells the Research agent what to look for instead (e.g., "Find the circuit for the 5-qubit perfect error-correcting code.").`;
@@ -170,35 +173,45 @@ const designAgentSystemInstruction = (numQubits: number, originalUserPrompt: str
 The complete and exhaustive set of available gate IDs is: ${definitiveGateIdList}. This is your ground truth for any 'use all' constraints.
 
 **Circuit Constraints:**
-- The circuit has ${numQubits} qubits (0 to ${numQubits - 1}). This can be changed with the 'set_qubit_count' tool if necessary.
+- The circuit currently has ${numQubits} qubits.
+- You can change this using 'set_qubit_count' to ANY value between 2 and 127.
 - 'left' parameter (0-100) dictates gate order. Use sensible, spaced-out values.
 - **Parametric Gates:** For gates like 'rx', 'ry', 'rz', you MUST provide the 'params' object with a 'theta' value (e.g., { theta: 'pi/2' }). If the user specifies an angle (e.g., "45 degrees", "0.5 radians"), convert it to a string format compatible with the tools.
 
 **Available Components & Tools:**
 ${dynamicGateLibrary}
-- **Set Qubit Count (tool: 'set_qubit_count')**: Changes the number of qubits on the canvas (from 2-5). This will clear the board.
-- **Add Gate (tool: 'add_gate')**: Adds a single gate to the circuit.
+- **Set Qubit Count (tool: 'set_qubit_count')**: Changes the number of qubits on the canvas (from 2-127). This will clear the board.
+- **Add Gate (tool: 'add_gate')**: Adds a single gate to the circuit. Supports adding to multiple qubits at once via 'qubits' array.
 - **Replace Circuit (tool: 'replace_circuit')**: Replaces the entire circuit with a new set of gates. PREFER this for building new circuits from scratch.
 - **Get Simulation Results (tool: 'get_simulation_results')**: Retrieves the current state vector and measurement probabilities.
 
-**CRITICAL 3-STEP EXECUTION PROCESS:**
+**CRITICAL 4-STEP EXECUTION PROCESS:**
 You MUST follow this internal monologue process before calling any tools.
 
-**Step 1: Pre-computation (Internal Monologue).**
+**Phase 0: Canvas & Requirement Check (Internal Monologue).**
+Before placing any gates, analyze the *required number of qubits* for the requested circuit.
+- If the user asks for a specific number (e.g., "10-qubit QAOA") or a complex algorithm that typically requires more qubits than the current count (${numQubits}), you MUST plan to call \`set_qubit_count(n)\` FIRST in your response.
+- Do not try to fit a large circuit into a small canvas. Always resize the canvas explicitly if the algorithm demands it.
+
+**Phase 1: Pre-computation (Internal Monologue).**
 Based on the high-level prompt you received (e.g., "Build the 5-qubit error correcting code"), formulate an initial plan of which tools and gates you *intend* to use.
 *Example Internal Monologue:* "To build the 5-qubit code, I will need H, X, Z, and CNOT gates. I will use the 'set_qubit_count' tool to set 5 qubits, and then the 'replace_circuit' tool with a payload of these gates."
 
-**Step 2: Self-Critique against Constraints (Internal Monologue).**
-Compare your pre-computed plan from Step 1 against the **Original User Request** and the **Definitive Component Checklist**. Identify any constraints that your initial plan fails to meet.
+**Phase 2: Self-Critique against Constraints (Internal Monologue).**
+Compare your pre-computed plan from Phase 1 against the **Original User Request** and the **Definitive Component Checklist**. Identify any constraints that your initial plan fails to meet.
 *Example Internal Monologue:* "My initial plan uses H, X, Z, and CNOT. The Original User Request includes the constraint 'use all the quantum gates'. My plan fails this constraint because it omits several gates from the definitive checklist, including 'measure'. My plan is incomplete."
 
-**Step 3: Self-Correction and Final Execution.**
-If Step 2 reveals a failure, you MUST generate a new, corrected, two-phase plan and then execute it by calling the necessary tools.
+**Phase 3: Self-Correction and Final Execution.**
+If Phase 2 reveals a failure, you MUST generate a new, corrected plan and then execute it by calling the necessary tools.
+*   **Efficiency Rule for Large Circuits:** If you need to apply the same single-qubit gate (like 'h', 'measure', or 'rx') to many qubits at the same vertical position (e.g., "Hadamard on all 10 qubits"), you MUST use the **\`qubits\` array parameter** instead of creating individual gate objects.
+    *   *Correct:* \`{ gateId: 'h', qubits: [0, 1, 2, 3, 4], left: 5 }\`
+    *   *Incorrect:* \`{ gateId: 'h', qubit: 0, left: 5 }, { gateId: 'h', qubit: 1, left: 5 }...\`
+    This is critical for performance and preventing errors on large circuits like QAOA or QFT.
 
-**Two-Phase Correction Algorithm:**
-1.  **Phase 1: Build the Conceptual Circuit.** First, use your tools (e.g., \`replace_circuit\`) to build the primary, conceptually-rich circuit requested by the user (like the 5-qubit error-correcting code).
-2.  **Phase 2: Algorithmic Completion.** Second, determine the set of \`gateId\`s from the **Definitive Component Checklist** that were NOT used in Phase 1. You will then iterate through this set of *missing* gates and use the \`add_gate\` tool to place each one.
-    *   **Rule for Measurement:** If the \`'measure'\` gate is in the set of missing gates, you MUST add it to **all qubits** at the very end of the circuit (e.g., at \`left: 95\`).
+**Two-Part Correction Algorithm (if needed):**
+1.  **Part A: Build the Conceptual Circuit.** First, use your tools (e.g., \`replace_circuit\`) to build the primary, conceptually-rich circuit requested by the user (like the 5-qubit error-correcting code).
+2.  **Part B: Algorithmic Completion.** Second, determine the set of \`gateId\`s from the **Definitive Component Checklist** that were NOT used in Part A. You will then iterate through this set of *missing* gates and use the \`add_gate\` tool to place each one.
+    *   **Rule for Measurement:** If the \`'measure'\` gate is in the set of missing gates, you MUST add it to **all qubits** at the very end of the circuit (e.g., at \`left: 95\`). Use the \`qubits\` array!
     *   **Rule for Other Gates:** Place the other missing unitary gates on available qubits at subsequent positions after the main circuit (e.g., \`left: 80\`, \`left: 85\`), ensuring they are all present.
 
 Your final output should ONLY be the tool calls required to build the corrected circuit. Do not output your internal monologue.`;
@@ -218,7 +231,7 @@ ${circuitDescription}
 **Your Task:**
 1.  **Analyze:** Carefully examine the provided circuit state.
 2.  **Diagnose:** Compare it against known algorithms and principles. If you find a logical error, state clearly what the error is and why it's a problem.
-3.  **Correct:** Use the \`replace_circuit\` tool to provide the full, corrected circuit. If the circuit is not a known algorithm or has no obvious errors, state that you can't find a specific flaw.
+3.  **Correct:** Use the \`replace_circuit\` tool to provide the full, corrected circuit. If the circuit is not a known algorithm or has no obvious errors, state that the circuit is already efficient.
 4.  **Explain:** After calling the tool, provide a brief, user-facing explanation of the fix.
 `;
 
@@ -278,7 +291,7 @@ export const getAgentResponse = async (
 
     const managerPrompt = `
 **Canvas State:**
-- The canvas currently has ${numQubits} qubits (0 to ${numQubits - 1}). This can be changed to any value between 2 and 5 using the 'set_qubit_count' tool.
+- The canvas currently has ${numQubits} qubits (0 to ${numQubits - 1}). This can be changed to any value between 2 and 127 using the 'set_qubit_count' tool.
 - **Current Circuit on Canvas:** ${circuitDescriptionForManager}
 
 **Latest User Request:**
@@ -461,6 +474,18 @@ ${userPromptText}
     let finalNumQubits = numQubits;
     let finalGates: Omit<PlacedGate, 'instanceId' | 'isSelected'>[] = currentCircuit.map(({ instanceId, isSelected, ...rest }) => rest);
 
+    // Helper to expand batched gates for the snapshot
+    const expandPayload = (payload: AddGatePayload): Omit<PlacedGate, 'instanceId' | 'isSelected'>[] => {
+         if (payload.qubits && Array.isArray(payload.qubits) && payload.qubits.length > 0) {
+             return payload.qubits.map((q: number) => ({
+                 ...payload,
+                 qubit: q,
+                 qubits: undefined, 
+             }));
+         }
+         return [payload];
+    };
+
     if (plan.length > 0) { // Only modify the circuit if there was a plan to do so. Handles "analyze" requests.
         let tempGatesState: Omit<PlacedGate, 'instanceId' | 'isSelected'>[] = [];
         let tempQubitState = numQubits;
@@ -472,13 +497,21 @@ ${userPromptText}
 
         const replaceAction = executionContext.designActions.find(a => a.type === 'replace_circuit');
         if (replaceAction && replaceAction.type === 'replace_circuit') {
-            tempGatesState = replaceAction.payload;
+            // Expand items in replace payload
+             replaceAction.payload.forEach(item => {
+                 tempGatesState.push(...expandPayload(item));
+             });
         } else if (setQubitAction) {
             const addActions = executionContext.designActions.filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate');
-            tempGatesState = addActions.map(a => a.payload);
+            addActions.forEach(a => {
+                tempGatesState.push(...expandPayload(a.payload));
+            });
         } else {
              const addActions = executionContext.designActions.filter((a): a is { type: 'add_gate'; payload: AddGatePayload } => a.type === 'add_gate');
-             tempGatesState = [...finalGates, ...addActions.map(a => a.payload)];
+             tempGatesState = [...finalGates];
+             addActions.forEach(a => {
+                tempGatesState.push(...expandPayload(a.payload));
+             });
         }
 
         finalNumQubits = tempQubitState;
