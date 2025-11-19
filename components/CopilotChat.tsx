@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Message } from '../types';
@@ -60,6 +61,7 @@ const renderFormattedText = (text: string) => {
 const CopilotChat: React.FC<CopilotChatProps> = ({ messages, isLoading, onSend }) => {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -67,9 +69,27 @@ const CopilotChat: React.FC<CopilotChatProps> = ({ messages, isLoading, onSend }
 
   useEffect(scrollToBottom, [messages]);
 
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      // Reset height to auto to allow shrinking
+      textareaRef.current.style.height = 'auto';
+      // Set height to scrollHeight to fit content, capped at 150px
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`;
+    }
+  }, [input]);
+
   const handleSend = () => {
+    if (!input.trim()) return;
     onSend(input);
     setInput('');
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   const renderMessageContent = (msg: Message) => {
@@ -92,7 +112,7 @@ const CopilotChat: React.FC<CopilotChatProps> = ({ messages, isLoading, onSend }
       transition={{ duration: 0.3 }}
       className="absolute inset-0 flex flex-col"
     >
-      <div className="flex-grow min-h-0 overflow-y-auto p-2">
+      <div className="flex-grow min-h-0 overflow-y-auto p-2 custom-scrollbar">
         <AnimatePresence>
           {messages.map((msg, index) => (
             <motion.div
@@ -161,20 +181,22 @@ const CopilotChat: React.FC<CopilotChatProps> = ({ messages, isLoading, onSend }
         )}
         <div ref={messagesEndRef} />
       </div>
-      <div className="flex-shrink-0 mt-4 flex items-center gap-2 border-t border-gray-500/20 pt-4">
-        <input
-          type="text"
+      <div className="flex-shrink-0 mt-4 flex items-end gap-2 border-t border-gray-500/20 pt-4">
+        <textarea
+          ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="Ask Milimo AI..."
-          className="flex-grow bg-gray-800/50 border border-gray-600/50 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
+          onKeyDown={handleKeyDown}
+          placeholder="Ask Milimo AI... (Shift+Enter for new line)"
+          rows={1}
+          className="flex-grow bg-gray-800/50 border border-gray-600/50 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all resize-none custom-scrollbar leading-relaxed"
           disabled={isLoading}
+          style={{ minHeight: '40px' }}
         />
         <button
           onClick={handleSend}
           disabled={isLoading || !input.trim()}
-          className="bg-cyan-500 text-black rounded-lg w-9 h-9 flex items-center justify-center flex-shrink-0 hover:bg-cyan-400 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed"
+          className="bg-cyan-500 text-black rounded-lg w-9 h-9 flex items-center justify-center flex-shrink-0 hover:bg-cyan-400 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed mb-0.5"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
             <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />

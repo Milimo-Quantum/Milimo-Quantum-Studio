@@ -3,8 +3,6 @@
 
 > **Stop Coding Quantum. Start Thinking It.**
 
-![Milimo Quantum Studio](assets/milimo_quantum_studio.png)
-
 For too long, the tools of quantum computing have demanded translation. You had an idea. A spark. A "what if." And then came the work. The work of translating your human thought into the rigid, unforgiving language of a machine. SDKs, boilerplate, linear algebra.
 
 The tool wasn't your partner. It was a tollbooth. And the price of admission was your momentum.
